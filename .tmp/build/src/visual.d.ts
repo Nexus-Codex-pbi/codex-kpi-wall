@@ -16,8 +16,12 @@ export declare class Visual implements IVisual {
     private isHighContrast;
     private hcForeground;
     private hcBackground;
+    private cornerSignature;
     constructor(options: VisualConstructorOptions);
     update(options: VisualUpdateOptions): void;
+    /** Untouched default ink flips to the dark-theme token (suite sentinel
+     *  idiom); a user-set colour is honoured as-is. */
+    private adaptive;
     private renderTitle;
     private renderEmpty;
     private parseCards;

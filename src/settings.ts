@@ -7,6 +7,10 @@ import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
 
+import { BackgroundSettings } from "./shared/backgroundSettings";
+import { BorderSettings } from "./shared/borderSettings";
+import { CardSignatureSettings } from "./shared/cardSignatureSettings";
+
 const ConstantOrRule = powerbi.VisualEnumerationInstanceKinds.ConstantOrRule;
 
 class TitleSettingsCard extends FormattingSettingsCard {
@@ -196,9 +200,13 @@ export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     changeStyle = new ChangeStyleCard();
     imageStyle = new ImageStyleCard();
     animation = new AnimationCard();
+    background = new BackgroundSettings();
+    cardSignature = new CardSignatureSettings();
+    visualBorder = new BorderSettings();
     cards = [
         this.titleSettings, this.layout, this.cardStyle,
         this.headlineStyle, this.labelStyle, this.subtitleStyle,
-        this.changeStyle, this.imageStyle, this.animation
+        this.changeStyle, this.imageStyle, this.animation,
+        this.background, this.cardSignature, this.visualBorder
     ];
 }

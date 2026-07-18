@@ -19,6 +19,21 @@ import DataView = powerbi.DataView;
 
 import { VisualFormattingSettingsModel } from "./settings";
 
+import { toRgba } from "./shared/colorHelpers";
+import { Theme, accentToken } from "./shared/bandEngine";
+import { surfaceTokens } from "./shared/designTokens";
+import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
+import { applyCardSignature } from "./shared/cardSignatureSettings";
+import { applyBorder } from "./shared/borderSettings";
+
+/** Luminance theme pick off the shared Background card (suite idiom). */
+function themeFor(hex: string): Theme {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i.exec(hex || "");
+    if (!m) return "light";
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? "dark" : "light";
+}
+
 interface CardData {
     label: string;
     headline: number | null;
@@ -51,6 +66,7 @@ export class Visual implements IVisual {
     private isHighContrast = false;
     private hcForeground = "";
     private hcBackground = "";
+    private cornerSignature: CardSignatureHandle | null = null;
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -74,6 +90,14 @@ export class Visual implements IVisual {
         this.rootDiv.className = "kpi-wall-root";
         this.target.appendChild(this.rootDiv);
 
+        // Corner-bracket card signature (suite kit) — overlays the tile,
+        // pointer-events:none, refreshed per render.
+        this.cornerSignature = makeCornerBrackets(
+            this.target,
+            accentToken("dark"),
+            { variant: "cornerBracket", mirror: true }
+        );
+
         // Allow deselection
         this.selectionManager.registerOnSelectCallback(() => { /* noop */ });
     }
@@ -95,8 +119,32 @@ export class Visual implements IVisual {
             // Clear root
             while (this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
 
+            // ── Theme + suite chrome (Background paints the ROOT so one
+            // background fills the tile; Border is CSS on the tile; corner
+            // overlay refreshes to the theme accent) ──
+            const background = this.formattingSettings.background;
+            const bgHex = background.backgroundColor.value?.value ?? "#ffffff";
+            const bgTransparencyPct = background.transparency.value ?? 100;
+            const theme: Theme = themeFor(bgHex);
+            this.target.style.background = this.isHighContrast
+                ? this.hcBackground : toRgba(bgHex, bgTransparencyPct);
+            applyBorder(this.target, this.formattingSettings.visualBorder, {
+                hcActive: this.isHighContrast,
+                hcColor: this.hcForeground,
+                palette: this.host.colorPalette,
+                metadataObjects: undefined,
+            });
+            applyCardSignature(this.cornerSignature, this.formattingSettings.cardSignature, {
+                autoHex: accentToken(theme),
+                hcActive: this.isHighContrast,
+                hcColor: this.hcForeground,
+                mirror: true,
+                glowMix: this.isHighContrast ? 0 : (theme === "dark" ? 55 : 0),
+                muted: false,
+            });
+
             // Title (always renders if enabled, even on landing — keeps cert in scope)
-            this.renderTitle();
+            this.renderTitle(theme);
 
             const cards = dv ? this.parseCards(dv) : [];
             if (cards.length === 0) {
@@ -105,14 +153,21 @@ export class Visual implements IVisual {
                 return;
             }
 
-            this.renderGrid(cards);
+            this.renderGrid(cards, theme);
             this.events.renderingFinished(options);
         } catch (e) {
             this.events.renderingFailed(options, String(e));
         }
     }
 
-    private renderTitle(): void {
+    /** Untouched default ink flips to the dark-theme token (suite sentinel
+     *  idiom); a user-set colour is honoured as-is. */
+    private adaptive(set: string | null | undefined, defaultHex: string, darkToken: string, theme: Theme): string {
+        const v = set || defaultHex;
+        return v === defaultHex && theme === "dark" ? darkToken : v;
+    }
+
+    private renderTitle(theme: Theme): void {
         const t = this.formattingSettings.titleSettings;
         if (!t?.showTitle?.value || !t?.titleText?.value) return;
         const el = document.createElement("div");
@@ -124,7 +179,7 @@ export class Visual implements IVisual {
         el.style.fontStyle = t.titleItalic?.value ? "italic" : "normal";
         el.style.textDecoration = t.titleUnderline?.value ? "underline" : "none";
         el.style.textAlign = (t.titleAlign?.value as string) || "left";
-        const c = t.titleColor?.value?.value;
+        const c = this.adaptive(t.titleColor?.value?.value, "#1a1a2e", surfaceTokens("dark").text, theme);
         if (c) el.style.color = this.isHighContrast ? this.hcForeground : c;
         this.rootDiv.appendChild(el);
     }
@@ -240,7 +295,7 @@ export class Visual implements IVisual {
         return cards;
     }
 
-    private renderGrid(cards: CardData[]): void {
+    private renderGrid(cards: CardData[], theme: Theme): void {
         const layout = this.formattingSettings.layout;
         const cardStyle = this.formattingSettings.cardStyle;
         const headline = this.formattingSettings.headlineStyle;
@@ -273,7 +328,7 @@ export class Visual implements IVisual {
         const image = this.formattingSettings.imageStyle;
 
         cards.forEach((card, i) => {
-            const cardEl = this.renderCard(card, i, cardStyle, headline, label, subtitle, change, image, aspectRatio);
+            const cardEl = this.renderCard(card, i, cardStyle, headline, label, subtitle, change, image, aspectRatio, theme);
             grid.appendChild(cardEl);
 
             if (anim.enable.value) {
@@ -297,11 +352,15 @@ export class Visual implements IVisual {
         ss: VisualFormattingSettingsModel["subtitleStyle"],
         chs: VisualFormattingSettingsModel["changeStyle"],
         ims: VisualFormattingSettingsModel["imageStyle"],
-        aspectRatio: string
+        aspectRatio: string,
+        theme: Theme
     ): HTMLDivElement {
+        const surf = surfaceTokens("dark");
         const accent = this.isHighContrast ? this.hcForeground : (card.accent || DEFAULT_PALETTE[index % DEFAULT_PALETTE.length]);
-        const bg = this.isHighContrast ? this.hcBackground : (cs.background.value.value || "#ffffff");
-        const borderC = this.isHighContrast ? this.hcForeground : (cs.borderColor.value.value || "#e8e6e0");
+        const bg = this.isHighContrast ? this.hcBackground
+            : this.adaptive(cs.background.value.value, "#ffffff", surf.card, theme);
+        const borderC = this.isHighContrast ? this.hcForeground
+            : this.adaptive(cs.borderColor.value.value, "#e8e6e0", surf.border, theme);
         const align = (s: { value?: { value?: string } | string } | undefined): string => {
             const v = s && (typeof s.value === "string" ? s.value : (s.value as { value?: string })?.value);
             return v === "center" || v === "right" ? v : "left";
@@ -374,7 +433,8 @@ export class Visual implements IVisual {
         if (ls.fontFamily.value) labelEl.style.fontFamily = ls.fontFamily.value;
         if (ls.fontSize.value) labelEl.style.fontSize = `${ls.fontSize.value}px`;
         labelEl.style.fontWeight = ls.bold.value ? "700" : "500";
-        labelEl.style.color = this.isHighContrast ? this.hcForeground : (ls.color.value.value || "#5e5d5a");
+        labelEl.style.color = this.isHighContrast ? this.hcForeground
+            : this.adaptive(ls.color.value.value, "#5e5d5a", surf.muted, theme);
         labelEl.style.textAlign = align(ls.align);
         content.appendChild(labelEl);
 
@@ -386,7 +446,8 @@ export class Visual implements IVisual {
         headlineEl.style.fontWeight = hs.bold.value ? "700" : "500";
         headlineEl.style.fontStyle = hs.italic.value ? "italic" : "normal";
         headlineEl.style.color = this.isHighContrast ? this.hcForeground
-            : (hs.useAccentColor.value ? accent : (hs.color.value.value || "#1a1a2e"));
+            : (hs.useAccentColor.value ? accent
+                : this.adaptive(hs.color.value.value, "#1a1a2e", surf.text, theme));
         headlineEl.style.textAlign = align(hs.align);
         content.appendChild(headlineEl);
 
@@ -398,7 +459,8 @@ export class Visual implements IVisual {
             subEl.className = "kpi-wall-card-subtitle";
             subEl.textContent = card.subtitle;
             if (ss.fontSize.value) subEl.style.fontSize = `${ss.fontSize.value}px`;
-            subEl.style.color = this.isHighContrast ? this.hcForeground : (ss.color.value.value || "#7a7773");
+            subEl.style.color = this.isHighContrast ? this.hcForeground
+                : this.adaptive(ss.color.value.value, "#7a7773", surf.muted, theme);
             subEl.style.textAlign = align(ss.align);
             subEl.style.flex = "1 1 auto";
             metaRow.appendChild(subEl);
@@ -413,7 +475,7 @@ export class Visual implements IVisual {
             const pillColor = this.isHighContrast ? this.hcForeground
                 : semantic === "positive" ? chs.positiveColor.value.value
                 : semantic === "negative" ? chs.negativeColor.value.value
-                : chs.neutralColor.value.value;
+                : this.adaptive(chs.neutralColor.value.value, "#7a7773", surf.muted, theme);
 
             const pillWrap = document.createElement("div");
             pillWrap.className = "kpi-wall-card-change-wrap";

@@ -2,6 +2,9 @@ import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
 import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
+import { BackgroundSettings } from "./shared/backgroundSettings";
+import { BorderSettings } from "./shared/borderSettings";
+import { CardSignatureSettings } from "./shared/cardSignatureSettings";
 declare class TitleSettingsCard extends FormattingSettingsCard {
     showTitle: formattingSettings.ToggleSwitch;
     titleText: formattingSettings.TextInput;
@@ -114,6 +117,9 @@ export declare class VisualFormattingSettingsModel extends FormattingSettingsMod
     changeStyle: ChangeStyleCard;
     imageStyle: ImageStyleCard;
     animation: AnimationCard;
-    cards: (TitleSettingsCard | LayoutCard | CardStyleCard | HeadlineStyleCard | LabelStyleCard | SubtitleStyleCard | ChangeStyleCard | ImageStyleCard | AnimationCard)[];
+    background: BackgroundSettings;
+    cardSignature: CardSignatureSettings;
+    visualBorder: BorderSettings;
+    cards: (TitleSettingsCard | LayoutCard | CardStyleCard | HeadlineStyleCard | LabelStyleCard | SubtitleStyleCard | ChangeStyleCard | ImageStyleCard | AnimationCard | BackgroundSettings | CardSignatureSettings | BorderSettings)[];
 }
 export {};
