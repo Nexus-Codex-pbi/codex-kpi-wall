@@ -278,18 +278,18 @@ export class Visual implements IVisual {
         bar.className = "kw-bar";
         if (accentStyle === "cornerBracket") {
             bar.style.borderColor = bandHex;
-            if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 60)})`;
+            if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
         } else {
             bar.style.background =
                 `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
-            if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 60)}`;
+            if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 40)}`;
         }
         el.appendChild(bar);
         if (twoCorners) {
             const c2 = document.createElement("div");
             c2.className = "kw-corner2";
             c2.style.borderColor = bandHex;
-            if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 60)})`;
+            if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
             el.appendChild(c2);
         }
 
@@ -330,7 +330,7 @@ export class Visual implements IVisual {
             dot.className = "kw-dot";
             dot.style.background = hc ? this.hcForeground
                 : `radial-gradient(circle at 35% 30%, ${mix("#ffffff", bandHex, 0.35)}, ${bandHex} 55%, ${mix("#000000", bandHex, 0.55)})`;
-            if (glow) dot.style.boxShadow = `0 0 8px ${toRgba(bandHex, 60)}`;
+            if (glow) dot.style.boxShadow = `0 0 8px ${toRgba(bandHex, 40)}`;
             head.appendChild(dot);
         }
         el.appendChild(head);
@@ -358,7 +358,7 @@ export class Visual implements IVisual {
                 const pill = document.createElement("span");
                 pill.className = "kw-pill";
                 pill.style.color = bandHex;
-                pill.style.background = hc ? "transparent" : toRgba(bandHex, 15);
+                pill.style.background = hc ? "transparent" : toRgba(bandHex, 85);
                 if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
                 pill.textContent = `${delta >= 0 ? "▲" : "▼"} ${(Math.abs(delta) * 100).toFixed(1)}%`;
                 foot.appendChild(pill);
@@ -380,7 +380,7 @@ export class Visual implements IVisual {
                 const seg = document.createElement("span");
                 if (s < lit) {
                     seg.style.background = bandHex;
-                    if (glow) seg.style.boxShadow = `0 0 5px ${toRgba(bandHex, 60)}`;
+                    if (glow) seg.style.boxShadow = `0 0 5px ${toRgba(bandHex, 40)}`;
                 } else {
                     seg.style.background = hc ? "transparent" : surf.track;
                     if (hc) seg.style.border = `1px solid ${this.hcForeground}`;
@@ -429,7 +429,7 @@ export class Visual implements IVisual {
             if (!el) return;
             const sel = this.selectedIdx.has(i);
             el.style.boxShadow = sel
-                ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, 30)}` : ""}`
+                ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, 70)}` : ""}`
                 : "";
             if (sel) el.style.borderColor = acc;
             if (!this.highlightActive) el.style.opacity = any && !sel ? "0.55" : "1";
