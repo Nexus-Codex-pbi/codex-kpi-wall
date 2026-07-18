@@ -1,5 +1,15 @@
 "use strict";
 
+/* ─── Codex KPI Wall — v2 rebuild ───────────────────────────────────────────
+ * Chop-and-restart 2026-07-18 (Neil: the mid-build was never deployed for a
+ * reason). Cell design ported from the normative KPI Card v2 board:
+ * docs/design-session-2026-07-09/Codex KPI Card v2.dc.html — the whole card
+ * runs on the value-vs-target band engine: ONE colour drives the accent,
+ * status dot, delta pill and quantised target strip. The delta pill is
+ * value/target-1 (band law), NOT a separate change measure — that is what
+ * collapsed the well set from 11 to 5.
+ */
+
 import powerbi from "powerbi-visuals-api";
 import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
 import "./../style/visual.less";
@@ -13,15 +23,14 @@ import ISelectionManager = powerbi.extensibility.ISelectionManager;
 import ISelectionId = powerbi.visuals.ISelectionId;
 import ITooltipService = powerbi.extensibility.ITooltipService;
 import VisualTooltipDataItem = powerbi.extensibility.VisualTooltipDataItem;
-import ILocalizationManager = powerbi.extensibility.ILocalizationManager;
 import ISandboxExtendedColorPalette = powerbi.extensibility.ISandboxExtendedColorPalette;
 import DataView = powerbi.DataView;
 
-import { VisualFormattingSettingsModel } from "./settings";
+import { VisualFormattingSettingsModel, textAlignFor } from "./settings";
 
 import { toRgba } from "./shared/colorHelpers";
-import { Theme, accentToken } from "./shared/bandEngine";
-import { surfaceTokens } from "./shared/designTokens";
+import { Theme, band, bandColor, accentToken } from "./shared/bandEngine";
+import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
 import { applyBorder } from "./shared/borderSettings";
@@ -34,25 +43,18 @@ function themeFor(hex: string): Theme {
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5 ? "dark" : "light";
 }
 
+const STRIP_SEGMENTS = 10;   // board: 10-segment quantised target strip
+
 interface CardData {
     label: string;
-    headline: number | null;
-    highlight: number | null;   // cross-highlight value from another visual
-    headlineFormat: string | null;
-    subtitle: string | null;
-    change: number | null;
-    changeFormat: string | null;
-    direction: number | null;
-    accent: string | null;
-    image: string | null;
+    value: number | null;
+    target: number | null;
+    highlight: number | null;
     sortOrder: number | null;
-    widthSpan: number | null;
-    heightSpan: number | null;
-    selectionId: ISelectionId | null;
+    valueFormat: string | null;
+    selectionId: ISelectionId;
     tooltipItems: VisualTooltipDataItem[];
 }
-
-const DEFAULT_PALETTE = ["#d4920a", "#007064", "#1a73e8", "#c50f1f", "#7c4dff", "#0b8043"];
 
 export class Visual implements IVisual {
     private host: IVisualHost;
@@ -61,7 +63,6 @@ export class Visual implements IVisual {
     private events: IVisualEventService;
     private selectionManager: ISelectionManager;
     private tooltipService: ITooltipService;
-    private localizationManager: ILocalizationManager;
     private formattingSettings: VisualFormattingSettingsModel;
     private formattingSettingsService: FormattingSettingsService;
     private isHighContrast = false;
@@ -69,6 +70,8 @@ export class Visual implements IVisual {
     private hcBackground = "";
     private cornerSignature: CardSignatureHandle | null = null;
     private highlightActive = false;
+    private cardEls: HTMLDivElement[] = [];
+    private selectedIdx = new Set<number>();
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -79,7 +82,6 @@ export class Visual implements IVisual {
         this.events = options.host.eventService;
         this.selectionManager = this.host.createSelectionManager();
         this.tooltipService = options.host.tooltipService;
-        this.localizationManager = this.host.createLocalizationManager();
         this.formattingSettingsService = new FormattingSettingsService();
 
         // Single context menu listener — Policy 1180.2.5 (MS sample BarChart pattern).
@@ -89,7 +91,7 @@ export class Visual implements IVisual {
         });
 
         this.rootDiv = document.createElement("div");
-        this.rootDiv.className = "kpi-wall-root";
+        this.rootDiv.className = "codex-visual-root";
         this.target.appendChild(this.rootDiv);
 
         // Corner-bracket card signature (suite kit) — overlays the tile,
@@ -100,8 +102,18 @@ export class Visual implements IVisual {
             { variant: "cornerBracket", mirror: true }
         );
 
-        // Allow deselection
-        this.selectionManager.registerOnSelectCallback(() => { /* noop */ });
+        this.selectionManager.registerOnSelectCallback(() => {
+            this.selectedIdx.clear();
+            this.applySelectionRing();
+        });
+
+        this.rootDiv.addEventListener("click", () => {
+            if (this.selectedIdx.size) {
+                this.selectionManager.clear();
+                this.selectedIdx.clear();
+                this.applySelectionRing();
+            }
+        });
     }
 
     public update(options: VisualUpdateOptions): void {
@@ -118,12 +130,10 @@ export class Visual implements IVisual {
             this.formattingSettings = this.formattingSettingsService
                 .populateFormattingSettingsModel(VisualFormattingSettingsModel, dv);
 
-            // Clear root
             while (this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
+            this.cardEls = [];
 
-            // ── Theme + suite chrome (Background paints the ROOT so one
-            // background fills the tile; Border is CSS on the tile; corner
-            // overlay refreshes to the theme accent) ──
+            // ── Theme + suite chrome ──
             const background = this.formattingSettings.background;
             const bgHex = background.backgroundColor.value?.value ?? "#ffffff";
             const bgTransparencyPct = background.transparency.value ?? 100;
@@ -145,408 +155,325 @@ export class Visual implements IVisual {
                 muted: false,
             });
 
-            // Title (always renders if enabled, even on landing — keeps cert in scope)
             this.renderTitle(theme);
 
             this.highlightActive = !!dv?.categorical?.values?.find(
-                v => v.source.roles && v.source.roles["headline"])?.highlights;
+                v => v.source.roles && v.source.roles["value"])?.highlights;
 
             const cards = dv ? this.parseCards(dv) : [];
             if (cards.length === 0) {
-                this.renderEmpty();
+                this.renderEmpty(theme);
                 this.events.renderingFinished(options);
                 return;
             }
 
             this.renderGrid(cards, theme);
+            this.applySelectionRing();
+
             this.events.renderingFinished(options);
         } catch (e) {
             this.events.renderingFailed(options, String(e));
         }
     }
 
-    /** Untouched default ink flips to the dark-theme token (suite sentinel
-     *  idiom); a user-set colour is honoured as-is. */
-    private adaptive(set: string | null | undefined, defaultHex: string, darkToken: string, theme: Theme): string {
-        const v = set || defaultHex;
-        return v === defaultHex && theme === "dark" ? darkToken : v;
+    // ─── Data ──────────────────────────────────────────────────
+
+    private parseCards(dv: DataView): CardData[] {
+        const cat = dv.categorical;
+        if (!cat?.categories?.length) return [];
+        const labels = cat.categories[0];
+        const valuesArr = cat.values || [];
+        const findCol = (role: string) => valuesArr.find(v => v.source.roles && v.source.roles[role]);
+        const valueCol = findCol("value");
+        const targetCol = findCol("target");
+        const sortCol = findCol("sortOrder");
+        const tooltipCols = valuesArr.filter(v => v.source.roles && v.source.roles["tooltips"]);
+        if (!valueCol) return [];
+
+        const num = (raw: powerbi.PrimitiveValue | undefined): number | null => {
+            const n = typeof raw === "number" ? raw : (raw == null ? NaN : Number(raw));
+            return isFinite(n) ? n : null;
+        };
+
+        const out: CardData[] = [];
+        const n = labels.values?.length ?? 0;
+        for (let i = 0; i < n; i++) {
+            const label = String(labels.values[i] ?? "");
+            const value = num(valueCol.values?.[i]);
+            const target = num(targetCol?.values?.[i]);
+            const highlight = num(valueCol.highlights?.[i]);
+            const sortOrder = num(sortCol?.values?.[i]);
+
+            const selectionId = this.host.createSelectionIdBuilder()
+                .withCategory(labels, i)
+                .createSelectionId();
+
+            const fmt = valueCol.source.format ?? null;
+            const tooltipItems: VisualTooltipDataItem[] = [
+                { displayName: labels.source.displayName || "Card", value: label },
+            ];
+            if (value != null) tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(value, fmt) });
+            if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetCol!.source.format ?? fmt) });
+            for (const tc of tooltipCols) {
+                const tv = tc.values?.[i];
+                if (tv != null) tooltipItems.push({ displayName: tc.source.displayName, value: this.formatValue(tv as number, tc.source.format ?? null) });
+            }
+
+            out.push({ label, value, target, highlight, sortOrder, valueFormat: fmt, selectionId, tooltipItems });
+        }
+
+        if (out.some(c => c.sortOrder != null)) {
+            out.sort((a, b) => (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER));
+        }
+        return out;
     }
+
+    // ─── Render ────────────────────────────────────────────────
+
+    private renderGrid(cards: CardData[], theme: Theme): void {
+        const layout = this.formattingSettings.layout;
+        const colsMode = String(layout.columnsMode.value?.value || "auto");
+        const minWidth = layout.minCardWidth.value ?? 240;
+        const gap = layout.cardGap.value ?? 14;
+
+        const grid = document.createElement("div");
+        grid.className = "kw-grid";
+        grid.style.gap = `${gap}px`;
+        grid.style.padding = `${Math.max(8, gap)}px`;
+        grid.style.gridTemplateColumns = colsMode === "auto"
+            ? `repeat(auto-fit, minmax(${minWidth}px, 1fr))`
+            : `repeat(${colsMode}, minmax(0, 1fr))`;
+
+        cards.forEach((card, i) => grid.appendChild(this.renderCard(card, i, theme)));
+        this.rootDiv.appendChild(grid);
+    }
+
+    private renderCard(card: CardData, index: number, theme: Theme): HTMLDivElement {
+        const kw = this.formattingSettings.kpiWall;
+        const vs = this.formattingSettings.valueStyle;
+        const ls = this.formattingSettings.labelStyle;
+        const hc = this.isHighContrast;
+        const surf = surfaceTokens(theme);
+        const accentStyle = String(kw.accentStyle.value?.value || "cornerBracket");
+        const twoCorners = accentStyle === "cornerBracket" && String(kw.corners.value?.value || "two") === "two";
+        const glow = !hc && theme === "dark";
+
+        const hasTarget = card.target != null && card.target > 0;
+        // Band law: no target reads neutral — the brand accent, not a verdict.
+        const bandHex = hc ? this.hcForeground
+            : hasTarget ? bandColor(band(card.value ?? NaN, card.target as number), theme)
+            : accentToken(theme);
+
+        const el = document.createElement("div");
+        el.className = `kw-card kw-${accentStyle}`;
+        el.style.background = hc ? this.hcBackground : surf.card;
+        el.style.border = `${hc ? 2 : 1}px solid ${hc ? this.hcForeground : surf.border}`;
+        this.cardEls[index] = el;
+
+        if (this.highlightActive && card.highlight == null) el.style.opacity = "0.35";
+
+        // Accent (board .k2bar): flat = gradient bar, glassTube = rounded
+        // gradient tube + CSS highlight, cornerBracket = border corners.
+        const bar = document.createElement("div");
+        bar.className = "kw-bar";
+        if (accentStyle === "cornerBracket") {
+            bar.style.borderColor = bandHex;
+            if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 60)})`;
+        } else {
+            bar.style.background =
+                `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
+            if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 60)}`;
+        }
+        el.appendChild(bar);
+        if (twoCorners) {
+            const c2 = document.createElement("div");
+            c2.className = "kw-corner2";
+            c2.style.borderColor = bandHex;
+            if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 60)})`;
+            el.appendChild(c2);
+        }
+
+        // Per-cell empty state (board .k2.nd) — value missing in the filter.
+        if (card.value == null) {
+            el.classList.add("kw-nd");
+            bar.style.background = hc ? this.hcForeground : surf.muted;
+            bar.style.opacity = "0.35";
+            bar.style.boxShadow = "none";
+            const ndv = document.createElement("div");
+            ndv.className = "kw-ndv";
+            ndv.style.color = hc ? this.hcForeground : surf.muted;
+            ndv.textContent = "— —";
+            const ndt = document.createElement("div");
+            ndt.className = "kw-ndt";
+            ndt.style.color = hc ? this.hcForeground : surf.muted;
+            ndt.textContent = "No data in current filter";
+            el.appendChild(ndv);
+            el.appendChild(ndt);
+            this.wireCard(el, index, card);
+            return el;
+        }
+
+        // Head: eyebrow label + beveled status dot.
+        const head = document.createElement("div");
+        head.className = "kw-head";
+        const eye = document.createElement("span");
+        eye.className = "kw-eye";
+        eye.textContent = ls.uppercase.value ? card.label.toUpperCase() : card.label;
+        if (ls.fontFamily.value) eye.style.fontFamily = ls.fontFamily.value;
+        if (ls.fontSize.value) eye.style.fontSize = `${ls.fontSize.value}px`;
+        eye.style.fontWeight = ls.bold.value ? "700" : "600";
+        eye.style.fontStyle = ls.italic.value ? "italic" : "normal";
+        eye.style.color = hc ? this.hcForeground : (ls.color.value?.value || surf.muted);
+        head.appendChild(eye);
+        if (kw.showDot.value) {
+            const dot = document.createElement("span");
+            dot.className = "kw-dot";
+            dot.style.background = hc ? this.hcForeground
+                : `radial-gradient(circle at 35% 30%, ${mix("#ffffff", bandHex, 0.35)}, ${bandHex} 55%, ${mix("#000000", bandHex, 0.55)})`;
+            if (glow) dot.style.boxShadow = `0 0 8px ${toRgba(bandHex, 60)}`;
+            head.appendChild(dot);
+        }
+        el.appendChild(head);
+
+        // Value — cross-highlight shows the highlighted number.
+        const shown = (this.highlightActive && card.highlight != null) ? card.highlight : card.value;
+        const val = document.createElement("div");
+        val.className = "kw-val";
+        val.textContent = this.formatValue(shown, card.valueFormat);
+        if (vs.fontFamily.value) val.style.fontFamily = vs.fontFamily.value;
+        if (vs.fontSize.value) val.style.fontSize = `${vs.fontSize.value}px`;
+        val.style.fontWeight = vs.bold.value ? "700" : "500";
+        val.style.fontStyle = vs.italic.value ? "italic" : "normal";
+        val.style.color = hc ? this.hcForeground : (vs.color.value?.value || surf.text);
+        el.appendChild(val);
+
+        // Foot: delta pill (value vs target — the band law, not raw direction)
+        // + target line + quantised strip.
+        const footWrap = document.createElement("div");
+        if (hasTarget && (kw.showPill.value || kw.showSub.value)) {
+            const foot = document.createElement("div");
+            foot.className = "kw-foot";
+            const delta = (card.value as number) / (card.target as number) - 1;
+            if (kw.showPill.value) {
+                const pill = document.createElement("span");
+                pill.className = "kw-pill";
+                pill.style.color = bandHex;
+                pill.style.background = hc ? "transparent" : toRgba(bandHex, 15);
+                if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
+                pill.textContent = `${delta >= 0 ? "▲" : "▼"} ${(Math.abs(delta) * 100).toFixed(1)}%`;
+                foot.appendChild(pill);
+            }
+            if (kw.showSub.value) {
+                const sub = document.createElement("span");
+                sub.className = "kw-sub";
+                sub.style.color = hc ? this.hcForeground : surf.muted;
+                sub.textContent = `${delta >= 0 ? "vs" : "to"} target ${this.formatValue(card.target as number, card.valueFormat)}`;
+                foot.appendChild(sub);
+            }
+            footWrap.appendChild(foot);
+        }
+        if (hasTarget && kw.showStrip.value) {
+            const strip = document.createElement("div");
+            strip.className = "kw-strip";
+            const lit = Math.round(Math.max(0, Math.min((card.value as number) / (card.target as number), 1)) * STRIP_SEGMENTS);
+            for (let s = 0; s < STRIP_SEGMENTS; s++) {
+                const seg = document.createElement("span");
+                if (s < lit) {
+                    seg.style.background = bandHex;
+                    if (glow) seg.style.boxShadow = `0 0 5px ${toRgba(bandHex, 60)}`;
+                } else {
+                    seg.style.background = hc ? "transparent" : surf.track;
+                    if (hc) seg.style.border = `1px solid ${this.hcForeground}`;
+                }
+                strip.appendChild(seg);
+            }
+            footWrap.appendChild(strip);
+        }
+        el.appendChild(footWrap);
+
+        this.wireCard(el, index, card);
+        return el;
+    }
+
+    private wireCard(el: HTMLDivElement, index: number, card: CardData): void {
+        el.addEventListener("mousemove", (e: MouseEvent) => {
+            this.tooltipService.show({
+                coordinates: [e.clientX, e.clientY],
+                isTouchEvent: false,
+                dataItems: card.tooltipItems,
+                identities: [card.selectionId],
+            });
+        });
+        el.addEventListener("mouseleave", () => {
+            this.tooltipService.hide({ isTouchEvent: false, immediately: false });
+        });
+        el.addEventListener("click", (e: MouseEvent) => {
+            const multi = e.ctrlKey || e.metaKey;
+            this.selectionManager.select(card.selectionId, multi).then((ids: ISelectionId[]) => {
+                if (!multi) this.selectedIdx.clear();
+                if (ids.length === 0) this.selectedIdx.clear();
+                else if (this.selectedIdx.has(index) && multi) this.selectedIdx.delete(index);
+                else this.selectedIdx.add(index);
+                this.applySelectionRing();
+            });
+            e.stopPropagation();
+        });
+    }
+
+    /** Board .k2.sel — accent ring on selected cards, others untouched. */
+    private applySelectionRing(): void {
+        const theme = themeFor(this.formattingSettings?.background?.backgroundColor?.value?.value ?? "#ffffff");
+        const acc = this.isHighContrast ? this.hcForeground : accentToken(theme);
+        const any = this.selectedIdx.size > 0;
+        this.cardEls.forEach((el, i) => {
+            if (!el) return;
+            const sel = this.selectedIdx.has(i);
+            el.style.boxShadow = sel
+                ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, 30)}` : ""}`
+                : "";
+            if (sel) el.style.borderColor = acc;
+            if (!this.highlightActive) el.style.opacity = any && !sel ? "0.55" : "1";
+        });
+    }
+
+    // ─── Title / landing ───────────────────────────────────────
 
     private renderTitle(theme: Theme): void {
         const t = this.formattingSettings.titleSettings;
         if (!t?.showTitle?.value || !t?.titleText?.value) return;
         const el = document.createElement("div");
-        el.className = "kpi-wall-title";
+        el.className = "codex-visual-title";
         el.textContent = t.titleText.value;
         if (t.titleFontFamily?.value) el.style.fontFamily = t.titleFontFamily.value;
         if (t.titleFontSize?.value) el.style.fontSize = `${t.titleFontSize.value}px`;
         el.style.fontWeight = t.titleBold?.value ? "700" : "400";
         el.style.fontStyle = t.titleItalic?.value ? "italic" : "normal";
         el.style.textDecoration = t.titleUnderline?.value ? "underline" : "none";
-        el.style.textAlign = (t.titleAlign?.value as string) || "left";
-        const c = this.adaptive(t.titleColor?.value?.value, "#1a1a2e", surfaceTokens("dark").text, theme);
+        el.style.textAlign = textAlignFor(t.titleAlign?.value as string);
+        // Untouched default ink flips to the dark-theme token (suite sentinel).
+        const set = t.titleColor?.value?.value;
+        const c = set === "#1a1a2e" && theme === "dark" ? surfaceTokens("dark").text : set;
         if (c) el.style.color = this.isHighContrast ? this.hcForeground : c;
         this.rootDiv.appendChild(el);
     }
 
-    private renderEmpty(): void {
+    // Landing state — fills the body so right-click reaches our DOM
+    // regardless of which region the cert reviewer hits.
+    private renderEmpty(theme: Theme): void {
+        const surf = surfaceTokens(theme);
         const wrap = document.createElement("div");
-        wrap.className = "kpi-wall-empty";
+        wrap.className = "codex-visual-empty";
         const h = document.createElement("div");
-        h.className = "kpi-wall-empty-title";
+        h.className = "codex-visual-empty-title";
+        h.style.color = this.isHighContrast ? this.hcForeground : surf.text;
         h.textContent = "Codex KPI Wall";
         const p = document.createElement("div");
-        p.className = "kpi-wall-empty-body";
-        p.textContent = "Add a Card label and a Headline value measure. Optional: Subtitle, Change value, Direction, Accent colour, Sort order.";
+        p.className = "codex-visual-empty-body";
+        p.style.color = this.isHighContrast ? this.hcForeground : surf.muted;
+        p.textContent = "Add a Card label and a Value measure. Optional: Target (drives the band colour, delta pill and target strip) and Sort order.";
         wrap.appendChild(h);
         wrap.appendChild(p);
         this.rootDiv.appendChild(wrap);
-    }
-
-    private parseCards(dv: DataView): CardData[] {
-        const cat = dv.categorical;
-        if (!cat || !cat.categories || cat.categories.length === 0) return [];
-        const labels = cat.categories[0];
-        const valuesArr = cat.values || [];
-
-        // Find each measure column by role
-        const findCol = (role: string) => valuesArr.find(v => v.source.roles && v.source.roles[role]);
-        const headlineCol = findCol("headline");
-        const subtitleCol = findCol("subtitle");
-        const changeCol = findCol("change");
-        const directionCol = findCol("direction");
-        const accentCol = findCol("accent");
-        const sortCol = findCol("sortOrder");
-        const imageCol = findCol("image");
-        const widthSpanCol = findCol("widthSpan");
-        const heightSpanCol = findCol("heightSpan");
-        const tooltipCols = valuesArr.filter(v => v.source.roles && v.source.roles["tooltips"]);
-
-        if (!headlineCol) return [];
-
-        const cards: CardData[] = [];
-        const n = labels.values?.length ?? 0;
-        for (let i = 0; i < n; i++) {
-            const label = String(labels.values[i] ?? "");
-            const headlineRaw = headlineCol.values?.[i];
-            const headline = (typeof headlineRaw === "number") ? headlineRaw : (headlineRaw == null ? null : Number(headlineRaw));
-
-            const hiRaw = headlineCol.highlights?.[i];
-            const highlight = (typeof hiRaw === "number") ? hiRaw : (hiRaw == null ? null : Number(hiRaw));
-
-            const subtitleRaw = subtitleCol?.values?.[i];
-            const subtitle = subtitleRaw == null ? null : String(subtitleRaw);
-
-            const changeRaw = changeCol?.values?.[i];
-            const change = (typeof changeRaw === "number") ? changeRaw : (changeRaw == null ? null : Number(changeRaw));
-
-            const directionRaw = directionCol?.values?.[i];
-            const direction = (typeof directionRaw === "number") ? directionRaw : (directionRaw == null ? null : Number(directionRaw));
-
-            const accentRaw = accentCol?.values?.[i];
-            let accent: string | null = null;
-            if (accentRaw != null) {
-                if (typeof accentRaw === "string" && accentRaw.startsWith("#")) accent = accentRaw;
-                else if (typeof accentRaw === "number") accent = DEFAULT_PALETTE[Math.abs(Math.floor(accentRaw)) % DEFAULT_PALETTE.length];
-                else accent = String(accentRaw);
-            }
-            if (!accent) accent = DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
-
-            const sortRaw = sortCol?.values?.[i];
-            const sortOrder = (typeof sortRaw === "number") ? sortRaw : (sortRaw == null ? null : Number(sortRaw));
-
-            const imageRaw = imageCol?.values?.[i];
-            const image = imageRaw == null ? null : String(imageRaw);
-
-            const widthRaw = widthSpanCol?.values?.[i];
-            const widthSpan = (typeof widthRaw === "number") ? Math.max(1, Math.min(12, Math.floor(widthRaw))) : null;
-            const heightRaw = heightSpanCol?.values?.[i];
-            const heightSpan = (typeof heightRaw === "number") ? Math.max(1, Math.min(4, Math.floor(heightRaw))) : null;
-
-            const selectionId = this.host.createSelectionIdBuilder()
-                .withCategory(labels, i)
-                .createSelectionId();
-
-            const tooltipItems: VisualTooltipDataItem[] = [
-                { displayName: "Card", value: label }
-            ];
-            if (headline != null) tooltipItems.push({ displayName: headlineCol.source.displayName, value: this.formatValue(headline, headlineCol.source.format) });
-            if (subtitle != null) tooltipItems.push({ displayName: "Subtitle", value: subtitle });
-            if (change != null) tooltipItems.push({ displayName: changeCol!.source.displayName, value: this.formatValue(change, changeCol!.source.format) });
-            for (const tc of tooltipCols) {
-                const v = tc.values?.[i];
-                if (v != null) tooltipItems.push({ displayName: tc.source.displayName, value: this.formatValue(v as number, tc.source.format) });
-            }
-
-            cards.push({
-                label,
-                headline,
-                highlight: (highlight != null && isFinite(highlight)) ? highlight : null,
-                headlineFormat: headlineCol.source.format ?? null,
-                subtitle,
-                change,
-                changeFormat: changeCol?.source.format ?? null,
-                direction,
-                accent,
-                image,
-                sortOrder,
-                widthSpan,
-                heightSpan,
-                selectionId,
-                tooltipItems
-            });
-        }
-
-        // Apply sort order
-        if (cards.some(c => c.sortOrder != null)) {
-            cards.sort((a, b) => (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER));
-        }
-        return cards;
-    }
-
-    private renderGrid(cards: CardData[], theme: Theme): void {
-        const layout = this.formattingSettings.layout;
-        const cardStyle = this.formattingSettings.cardStyle;
-        const headline = this.formattingSettings.headlineStyle;
-        const label = this.formattingSettings.labelStyle;
-        const subtitle = this.formattingSettings.subtitleStyle;
-        const change = this.formattingSettings.changeStyle;
-        const anim = this.formattingSettings.animation;
-
-        const colsMode = (layout.columnsMode.value as { value?: string })?.value || "auto";
-        const minWidth = layout.minCardWidth.value ?? 180;
-        const gap = layout.cardGap.value ?? 12;
-        const outer = layout.outerPadding.value ?? 0;
-        const aspect = (layout.aspectRatio.value as { value?: string })?.value || "free";
-
-        const grid = document.createElement("div");
-        grid.className = "kpi-wall-grid";
-        grid.style.padding = `${outer}px`;
-        grid.style.gap = `${gap}px`;
-        if (colsMode === "auto") {
-            grid.style.gridTemplateColumns = `repeat(auto-fit, minmax(${minWidth}px, 1fr))`;
-        } else {
-            grid.style.gridTemplateColumns = `repeat(${colsMode}, minmax(0, 1fr))`;
-        }
-
-        const aspectRatio = aspect === "square" ? "1 / 1"
-            : aspect === "wide" ? "16 / 9"
-            : aspect === "tall" ? "3 / 4"
-            : "";
-
-        const image = this.formattingSettings.imageStyle;
-
-        cards.forEach((card, i) => {
-            const cardEl = this.renderCard(card, i, cardStyle, headline, label, subtitle, change, image, aspectRatio, theme);
-            grid.appendChild(cardEl);
-
-            if (anim.enable.value) {
-                const stagger = Math.max(0, anim.staggerMs.value ?? 60);
-                window.setTimeout(() => {
-                    cardEl.classList.add("shine");
-                    cardEl.addEventListener("animationend", () => cardEl.classList.remove("shine"), { once: true });
-                }, i * stagger);
-            }
-        });
-
-        this.rootDiv.appendChild(grid);
-    }
-
-    private renderCard(
-        card: CardData,
-        index: number,
-        cs: VisualFormattingSettingsModel["cardStyle"],
-        hs: VisualFormattingSettingsModel["headlineStyle"],
-        ls: VisualFormattingSettingsModel["labelStyle"],
-        ss: VisualFormattingSettingsModel["subtitleStyle"],
-        chs: VisualFormattingSettingsModel["changeStyle"],
-        ims: VisualFormattingSettingsModel["imageStyle"],
-        aspectRatio: string,
-        theme: Theme
-    ): HTMLDivElement {
-        const surf = surfaceTokens("dark");
-        const accent = this.isHighContrast ? this.hcForeground : (card.accent || DEFAULT_PALETTE[index % DEFAULT_PALETTE.length]);
-        const bg = this.isHighContrast ? this.hcBackground
-            : this.adaptive(cs.background.value.value, "#ffffff", surf.card, theme);
-        const borderC = this.isHighContrast ? this.hcForeground
-            : this.adaptive(cs.borderColor.value.value, "#e8e6e0", surf.border, theme);
-        const align = (s: { value?: { value?: string } | string } | undefined): string => {
-            const v = s && (typeof s.value === "string" ? s.value : (s.value as { value?: string })?.value);
-            return v === "center" || v === "right" ? v : "left";
-        };
-
-        const cardEl = document.createElement("div");
-        cardEl.className = "kpi-wall-card";
-        cardEl.style.background = bg;
-        cardEl.style.borderRadius = `${cs.borderRadius.value ?? 8}px`;
-        cardEl.style.border = `${cs.borderWidth.value ?? 1}px solid ${borderC}`;
-        cardEl.style.padding = `${cs.cardPadding.value ?? 16}px`;
-        if (cs.shadow.value) cardEl.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)";
-        if (aspectRatio) cardEl.style.aspectRatio = aspectRatio;
-
-        // Cross-highlight: cards with no contribution to the selection dim;
-        // contributing cards show the highlighted value in the headline.
-        if (this.highlightActive && card.highlight == null) cardEl.style.opacity = "0.35";
-
-        // Per-card grid spans (optional, driven by widthSpan / heightSpan measures)
-        if (card.widthSpan && card.widthSpan > 1) {
-            cardEl.style.gridColumn = `span ${card.widthSpan}`;
-        }
-        if (card.heightSpan && card.heightSpan > 1) {
-            cardEl.style.gridRow = `span ${card.heightSpan}`;
-        }
-
-        // Accent stripe
-        const accentPos = (cs.accentPosition.value as { value?: string })?.value || "top";
-        const accentW = cs.accentWidth.value ?? 4;
-        if (accentPos !== "none") {
-            const stripe = document.createElement("div");
-            stripe.className = `kpi-wall-accent kpi-wall-accent-${accentPos}`;
-            stripe.style.background = accent;
-            if (accentPos === "top" || accentPos === "bottom") stripe.style.height = `${accentW}px`;
-            else stripe.style.width = `${accentW}px`;
-            cardEl.appendChild(stripe);
-        }
-
-        // Image (background mode applied here as absolute layer behind content)
-        const imgPos = (ims.position.value as { value?: string })?.value || "top";
-        const imgShape = (ims.shape.value as { value?: string })?.value || "rounded";
-        const imgFit = (ims.fit.value as { value?: string })?.value || "contain";
-        const imgSize = ims.size.value ?? 48;
-        const showImage = ims.show.value && card.image;
-
-        if (showImage && imgPos === "background") {
-            const bgImg = document.createElement("div");
-            bgImg.className = "kpi-wall-card-bgimage";
-            bgImg.style.backgroundImage = `url("${card.image}")`;
-            bgImg.style.backgroundSize = imgFit === "cover" ? "cover" : "contain";
-            bgImg.style.opacity = String(Math.max(0, Math.min(100, ims.opacity.value ?? 25)) / 100);
-            cardEl.appendChild(bgImg);
-        }
-
-        const buildImage = (): HTMLImageElement => {
-            const img = document.createElement("img");
-            img.src = card.image as string;
-            img.alt = "";
-            img.className = `kpi-wall-card-image kpi-wall-card-image-${imgShape}`;
-            img.style.width = `${imgSize}px`;
-            img.style.height = `${imgSize}px`;
-            img.style.objectFit = imgFit;
-            img.style.flex = "0 0 auto";
-            return img;
-        };
-
-        // Content (label + headline + meta)
-        const content = document.createElement("div");
-        content.className = "kpi-wall-card-content";
-
-        const labelEl = document.createElement("div");
-        labelEl.className = "kpi-wall-card-label";
-        labelEl.textContent = ls.uppercase.value ? card.label.toUpperCase() : card.label;
-        if (ls.fontFamily.value) labelEl.style.fontFamily = ls.fontFamily.value;
-        if (ls.fontSize.value) labelEl.style.fontSize = `${ls.fontSize.value}px`;
-        labelEl.style.fontWeight = ls.bold.value ? "700" : "500";
-        labelEl.style.color = this.isHighContrast ? this.hcForeground
-            : this.adaptive(ls.color.value.value, "#5e5d5a", surf.muted, theme);
-        labelEl.style.textAlign = align(ls.align);
-        content.appendChild(labelEl);
-
-        const headlineEl = document.createElement("div");
-        headlineEl.className = "kpi-wall-card-headline";
-        const shownHeadline = (this.highlightActive && card.highlight != null) ? card.highlight : card.headline;
-        headlineEl.textContent = shownHeadline == null ? "—" : this.formatValue(shownHeadline, card.headlineFormat);
-        if (hs.fontFamily.value) headlineEl.style.fontFamily = hs.fontFamily.value;
-        if (hs.fontSize.value) headlineEl.style.fontSize = `${hs.fontSize.value}px`;
-        headlineEl.style.fontWeight = hs.bold.value ? "700" : "500";
-        headlineEl.style.fontStyle = hs.italic.value ? "italic" : "normal";
-        headlineEl.style.color = this.isHighContrast ? this.hcForeground
-            : (hs.useAccentColor.value ? accent
-                : this.adaptive(hs.color.value.value, "#1a1a2e", surf.text, theme));
-        headlineEl.style.textAlign = align(hs.align);
-        content.appendChild(headlineEl);
-
-        const metaRow = document.createElement("div");
-        metaRow.className = "kpi-wall-card-meta";
-
-        if (card.subtitle) {
-            const subEl = document.createElement("div");
-            subEl.className = "kpi-wall-card-subtitle";
-            subEl.textContent = card.subtitle;
-            if (ss.fontSize.value) subEl.style.fontSize = `${ss.fontSize.value}px`;
-            subEl.style.color = this.isHighContrast ? this.hcForeground
-                : this.adaptive(ss.color.value.value, "#7a7773", surf.muted, theme);
-            subEl.style.textAlign = align(ss.align);
-            subEl.style.flex = "1 1 auto";
-            metaRow.appendChild(subEl);
-        }
-
-        if (chs.show.value && card.change != null) {
-            const dir = card.direction != null ? Math.sign(card.direction) : Math.sign(card.change);
-            const upGood = chs.upIsGood.value;
-            const semantic = dir > 0 ? (upGood ? "positive" : "negative")
-                : dir < 0 ? (upGood ? "negative" : "positive")
-                : "neutral";
-            const pillColor = this.isHighContrast ? this.hcForeground
-                : semantic === "positive" ? chs.positiveColor.value.value
-                : semantic === "negative" ? chs.negativeColor.value.value
-                : this.adaptive(chs.neutralColor.value.value, "#7a7773", surf.muted, theme);
-
-            const pillWrap = document.createElement("div");
-            pillWrap.className = "kpi-wall-card-change-wrap";
-            pillWrap.style.textAlign = align(chs.align);
-            pillWrap.style.flex = "1 1 auto";
-
-            const pill = document.createElement("span");
-            pill.className = "kpi-wall-card-change";
-            if (chs.fontSize.value) pill.style.fontSize = `${chs.fontSize.value}px`;
-            pill.style.color = pillColor;
-            pill.style.borderColor = pillColor;
-            const arrow = chs.showArrow.value ? (dir > 0 ? "▲ " : dir < 0 ? "▼ " : "● ") : "";
-            pill.textContent = `${arrow}${this.formatValue(card.change, card.changeFormat)}`;
-            pillWrap.appendChild(pill);
-            metaRow.appendChild(pillWrap);
-        }
-        content.appendChild(metaRow);
-
-        // Layout the image relative to content
-        if (showImage && imgPos === "top") {
-            cardEl.appendChild(buildImage());
-            cardEl.appendChild(content);
-        } else if (showImage && (imgPos === "left" || imgPos === "right")) {
-            const row = document.createElement("div");
-            row.className = "kpi-wall-card-row";
-            if (imgPos === "left") {
-                row.appendChild(buildImage());
-                row.appendChild(content);
-            } else {
-                row.appendChild(content);
-                row.appendChild(buildImage());
-            }
-            cardEl.appendChild(row);
-        } else {
-            cardEl.appendChild(content);
-        }
-
-        // Interactions
-        cardEl.addEventListener("mousemove", (e: MouseEvent) => {
-            this.tooltipService.show({
-                coordinates: [e.clientX, e.clientY],
-                isTouchEvent: false,
-                dataItems: card.tooltipItems,
-                identities: card.selectionId ? [card.selectionId] : []
-            });
-        });
-        cardEl.addEventListener("mouseleave", () => {
-            this.tooltipService.hide({ isTouchEvent: false, immediately: false });
-        });
-        cardEl.addEventListener("click", (e: MouseEvent) => {
-            if (card.selectionId) {
-                this.selectionManager.select(card.selectionId, e.ctrlKey || e.metaKey);
-            }
-            e.stopPropagation();
-        });
-
-        return cardEl;
     }
 
     private formatValue(n: number, format: string | null): string {

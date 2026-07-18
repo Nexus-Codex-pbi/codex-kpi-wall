@@ -5,6 +5,7 @@ import FormattingSettingsModel = formattingSettings.Model;
 import { BackgroundSettings } from "./shared/backgroundSettings";
 import { BorderSettings } from "./shared/borderSettings";
 import { CardSignatureSettings } from "./shared/cardSignatureSettings";
+export declare function textAlignFor(v: string | undefined): string;
 declare class TitleSettingsCard extends FormattingSettingsCard {
     showTitle: formattingSettings.ToggleSwitch;
     titleText: formattingSettings.TextInput;
@@ -20,38 +21,32 @@ declare class TitleSettingsCard extends FormattingSettingsCard {
     displayName: string;
     slices: FormattingSettingsSlice[];
 }
+declare class KpiWallCard extends FormattingSettingsCard {
+    accentStyle: formattingSettings.ItemDropdown;
+    corners: formattingSettings.ItemDropdown;
+    showDot: formattingSettings.ToggleSwitch;
+    showPill: formattingSettings.ToggleSwitch;
+    showSub: formattingSettings.ToggleSwitch;
+    showStrip: formattingSettings.ToggleSwitch;
+    name: string;
+    displayName: string;
+    slices: FormattingSettingsSlice[];
+}
 declare class LayoutCard extends FormattingSettingsCard {
     columnsMode: formattingSettings.ItemDropdown;
     minCardWidth: formattingSettings.NumUpDown;
     cardGap: formattingSettings.NumUpDown;
-    outerPadding: formattingSettings.NumUpDown;
-    aspectRatio: formattingSettings.ItemDropdown;
     name: string;
     displayName: string;
     slices: FormattingSettingsSlice[];
 }
-declare class CardStyleCard extends FormattingSettingsCard {
-    background: formattingSettings.ColorPicker;
-    borderRadius: formattingSettings.NumUpDown;
-    borderColor: formattingSettings.ColorPicker;
-    borderWidth: formattingSettings.NumUpDown;
-    shadow: formattingSettings.ToggleSwitch;
-    accentPosition: formattingSettings.ItemDropdown;
-    accentWidth: formattingSettings.NumUpDown;
-    cardPadding: formattingSettings.NumUpDown;
-    name: string;
-    displayName: string;
-    slices: FormattingSettingsSlice[];
-}
-declare class HeadlineStyleCard extends FormattingSettingsCard {
+declare class ValueStyleCard extends FormattingSettingsCard {
     fontFamily: formattingSettings.FontPicker;
     fontSize: formattingSettings.NumUpDown;
     bold: formattingSettings.ToggleSwitch;
     italic: formattingSettings.ToggleSwitch;
     font: formattingSettings.FontControl;
     color: formattingSettings.ColorPicker;
-    useAccentColor: formattingSettings.ToggleSwitch;
-    align: formattingSettings.AlignmentGroup;
     name: string;
     displayName: string;
     slices: FormattingSettingsSlice[];
@@ -60,66 +55,23 @@ declare class LabelStyleCard extends FormattingSettingsCard {
     fontFamily: formattingSettings.FontPicker;
     fontSize: formattingSettings.NumUpDown;
     bold: formattingSettings.ToggleSwitch;
+    italic: formattingSettings.ToggleSwitch;
     font: formattingSettings.FontControl;
     color: formattingSettings.ColorPicker;
     uppercase: formattingSettings.ToggleSwitch;
-    align: formattingSettings.AlignmentGroup;
-    name: string;
-    displayName: string;
-    slices: FormattingSettingsSlice[];
-}
-declare class SubtitleStyleCard extends FormattingSettingsCard {
-    fontSize: formattingSettings.NumUpDown;
-    color: formattingSettings.ColorPicker;
-    align: formattingSettings.AlignmentGroup;
-    name: string;
-    displayName: string;
-    slices: FormattingSettingsSlice[];
-}
-declare class ChangeStyleCard extends FormattingSettingsCard {
-    show: formattingSettings.ToggleSwitch;
-    fontSize: formattingSettings.NumUpDown;
-    positiveColor: formattingSettings.ColorPicker;
-    negativeColor: formattingSettings.ColorPicker;
-    neutralColor: formattingSettings.ColorPicker;
-    upIsGood: formattingSettings.ToggleSwitch;
-    showArrow: formattingSettings.ToggleSwitch;
-    align: formattingSettings.AlignmentGroup;
-    name: string;
-    displayName: string;
-    slices: FormattingSettingsSlice[];
-}
-declare class ImageStyleCard extends FormattingSettingsCard {
-    show: formattingSettings.ToggleSwitch;
-    position: formattingSettings.ItemDropdown;
-    size: formattingSettings.NumUpDown;
-    shape: formattingSettings.ItemDropdown;
-    fit: formattingSettings.ItemDropdown;
-    opacity: formattingSettings.NumUpDown;
-    name: string;
-    displayName: string;
-    slices: FormattingSettingsSlice[];
-}
-declare class AnimationCard extends FormattingSettingsCard {
-    enable: formattingSettings.ToggleSwitch;
-    staggerMs: formattingSettings.NumUpDown;
     name: string;
     displayName: string;
     slices: FormattingSettingsSlice[];
 }
 export declare class VisualFormattingSettingsModel extends FormattingSettingsModel {
-    titleSettings: TitleSettingsCard;
+    kpiWall: KpiWallCard;
     layout: LayoutCard;
-    cardStyle: CardStyleCard;
-    headlineStyle: HeadlineStyleCard;
+    valueStyle: ValueStyleCard;
     labelStyle: LabelStyleCard;
-    subtitleStyle: SubtitleStyleCard;
-    changeStyle: ChangeStyleCard;
-    imageStyle: ImageStyleCard;
-    animation: AnimationCard;
+    titleSettings: TitleSettingsCard;
     background: BackgroundSettings;
     cardSignature: CardSignatureSettings;
     visualBorder: BorderSettings;
-    cards: (TitleSettingsCard | LayoutCard | CardStyleCard | HeadlineStyleCard | LabelStyleCard | SubtitleStyleCard | ChangeStyleCard | ImageStyleCard | AnimationCard | BackgroundSettings | CardSignatureSettings | BorderSettings)[];
+    cards: (KpiWallCard | LayoutCard | ValueStyleCard | LabelStyleCard | TitleSettingsCard | BackgroundSettings | CardSignatureSettings | BorderSettings)[];
 }
 export {};

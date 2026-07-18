@@ -1,180 +1,180 @@
-.kpi-wall-root {
+/* Codex KPI Wall — v2 cell chrome ported from the KPI Card v2 board
+ * (docs/design-session-2026-07-09/Codex KPI Card v2.dc.html). Colours that
+ * depend on the band engine are set inline from TS via CSS custom props
+ * (--band and computed gradients); everything static lives here. */
+.codex-visual-root {
   width: 100%;
   height: 100%;
-  overflow: auto;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
-.kpi-wall-title {
-  flex: 0 0 auto;
+.codex-visual-title {
+  padding: 6px 10px 4px;
+  line-height: 1.25;
 }
-.kpi-wall-empty {
-  flex: 1 1 auto;
+.codex-visual-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  height: 100%;
+  gap: 8px;
   padding: 16px;
   text-align: center;
-  color: #5e5d5a;
 }
-.kpi-wall-empty-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 6px;
+.codex-visual-empty-title {
+  font-size: 15px;
+  font-weight: 700;
 }
-.kpi-wall-empty-body {
+.codex-visual-empty-body {
   font-size: 12px;
-  max-width: 360px;
+  opacity: 0.75;
+  max-width: 420px;
 }
-.kpi-wall-grid {
+.kw-grid {
   display: grid;
+  box-sizing: border-box;
+  width: 100%;
   align-content: start;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  box-sizing: border-box;
-  grid-auto-rows: min-content;
 }
-.kpi-wall-card {
+/* ─── The v2 cell (board .k2) ─────────────────────────────────── */
+.kw-card {
   position: relative;
+  min-height: 158px;
+  border-radius: 10px;
+  padding: 16px 20px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
   overflow: hidden;
-  box-sizing: border-box;
   cursor: pointer;
-  transition: transform 0.15s ease;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  /* Floor — content always has room; aspect-ratio hint above this floor */
-  min-height: 96px;
-  min-width: 0;
 }
-.kpi-wall-card:hover {
-  transform: translateY(-1px);
-}
-.kpi-wall-card:focus-visible {
-  outline: 2px solid #1a73e8;
-  outline-offset: 2px;
-}
-.kpi-wall-accent {
+/* Accent — flat bar (board .k2bar) */
+.kw-bar {
   position: absolute;
-  pointer-events: none;
-}
-.kpi-wall-accent-top {
-  top: 0;
   left: 0;
-  right: 0;
-}
-.kpi-wall-accent-bottom {
-  bottom: 0;
-  left: 0;
-  right: 0;
-}
-.kpi-wall-accent-left {
   top: 0;
   bottom: 0;
-  left: 0;
-}
-.kpi-wall-accent-right {
-  top: 0;
-  bottom: 0;
-  right: 0;
-}
-.kpi-wall-card-label {
-  letter-spacing: 0.4px;
-  line-height: 1.2;
-  margin-bottom: 4px;
-}
-.kpi-wall-card-headline {
-  line-height: 1.1;
-  margin-bottom: 6px;
-  word-break: break-word;
-}
-.kpi-wall-card-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.kpi-wall-card-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.kpi-wall-card-image {
-  display: block;
-}
-.kpi-wall-card-image-square {
-  border-radius: 0;
-}
-.kpi-wall-card-image-rounded {
-  border-radius: 8px;
-}
-.kpi-wall-card-image-circle {
-  border-radius: 50%;
-}
-.kpi-wall-card-bgimage {
-  position: absolute;
-  inset: 0;
-  background-position: center;
-  background-repeat: no-repeat;
-  pointer-events: none;
-  z-index: 0;
-}
-.kpi-wall-card > * {
-  position: relative;
+  width: 4px;
   z-index: 1;
 }
-.kpi-wall-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: auto;
+/* Accent — glass tube (board .gloss) */
+.kw-glassTube .kw-bar {
+  width: 7px;
+  left: 7px;
+  top: 12px;
+  bottom: 12px;
+  border-radius: 99px;
 }
-.kpi-wall-card-change-wrap {
-  display: block;
-}
-.kpi-wall-card-subtitle {
-  line-height: 1.2;
-}
-.kpi-wall-card-change {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border: 1px solid;
-  border-radius: 999px;
-  font-weight: 600;
-  line-height: 1.4;
-  background: rgba(255, 255, 255, 0.7);
-}
-.kpi-wall-card::after {
+.kw-glassTube .kw-bar::after {
   content: "";
   position: absolute;
-  inset: 0;
-  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.22) 50%, transparent 70%);
-  transform: translateX(-100%);
+  left: 1.5px;
+  top: 7%;
+  bottom: 7%;
+  width: 2.2px;
+  border-radius: 99px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.15) 55%, rgba(255, 255, 255, 0.45));
+}
+/* Accent — corner bracket (board .acccorner / .acc2); colours inline from TS */
+.kw-cornerBracket .kw-bar {
+  top: 0;
+  left: 0;
+  bottom: auto;
+  width: 52px;
+  height: 52px;
+  background: none !important;
+  border-top: 4px solid;
+  border-left: 4px solid;
+  border-radius: 10px 0 0 0;
+  box-shadow: none !important;
+}
+.kw-corner2 {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 52px;
+  height: 52px;
+  border-bottom: 4px solid;
+  border-right: 4px solid;
+  border-radius: 0 0 10px 0;
   pointer-events: none;
 }
-.kpi-wall-card.shine::after {
-  animation: kpi-wall-shine 900ms ease-out;
+.kw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
-@keyframes kpi-wall-shine {
-  to {
-    transform: translateX(100%);
-  }
+.kw-eye {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@media (prefers-reduced-motion: reduce) {
-  .kpi-wall-card.shine::after {
-    animation: none;
-  }
-  .kpi-wall-card {
-    transition: none;
-  }
+.kw-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.kw-val {
+  font-size: 42px;
+  line-height: 0.95;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kw-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.kw-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+  padding: 3px 9px;
+  border-radius: 999px;
+  line-height: 1.3;
+}
+.kw-sub {
+  font-size: 12.5px;
+}
+.kw-strip {
+  display: flex;
+  gap: 3px;
+  margin-top: 9px;
+}
+.kw-strip span {
+  flex: 1;
+  height: 6px;
+  border-radius: 2px;
+}
+/* Per-cell empty state (board .k2.nd) */
+.kw-nd {
+  justify-content: center;
+  align-items: flex-start;
+}
+.kw-ndv {
+  font-size: 34px;
+  font-weight: 700;
+  opacity: 0.5;
+  line-height: 1;
+}
+.kw-ndt {
+  font-size: 12.5px;
+  margin-top: 8px;
 }
 

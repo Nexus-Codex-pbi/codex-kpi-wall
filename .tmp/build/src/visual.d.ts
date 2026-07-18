@@ -10,7 +10,6 @@ export declare class Visual implements IVisual {
     private events;
     private selectionManager;
     private tooltipService;
-    private localizationManager;
     private formattingSettings;
     private formattingSettingsService;
     private isHighContrast;
@@ -18,16 +17,18 @@ export declare class Visual implements IVisual {
     private hcBackground;
     private cornerSignature;
     private highlightActive;
+    private cardEls;
+    private selectedIdx;
     constructor(options: VisualConstructorOptions);
     update(options: VisualUpdateOptions): void;
-    /** Untouched default ink flips to the dark-theme token (suite sentinel
-     *  idiom); a user-set colour is honoured as-is. */
-    private adaptive;
-    private renderTitle;
-    private renderEmpty;
     private parseCards;
     private renderGrid;
     private renderCard;
+    private wireCard;
+    /** Board .k2.sel — accent ring on selected cards, others untouched. */
+    private applySelectionRing;
+    private renderTitle;
+    private renderEmpty;
     private formatValue;
     getFormattingModel(): powerbi.visuals.FormattingModel;
     destroy(): void;
