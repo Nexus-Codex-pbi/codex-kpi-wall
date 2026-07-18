@@ -1,0 +1,187 @@
+{
+  "dataRoles": [
+    { "displayName": "Card label", "name": "cardLabel", "kind": "Grouping", "description": "Per-card label (one row per card)" },
+    { "displayName": "Headline value", "name": "headline", "kind": "Measure", "description": "Primary value displayed prominently in each card" },
+    { "displayName": "Subtitle", "name": "subtitle", "kind": "Measure", "description": "Optional context line under the headline (e.g. 'vs last week')" },
+    { "displayName": "Change value", "name": "change", "kind": "Measure", "description": "Optional change/delta displayed as a pill" },
+    { "displayName": "Direction", "name": "direction", "kind": "Measure", "description": "Optional. -1 / 0 / 1 (or negative / zero / positive). Drives change pill colour and arrow." },
+    { "displayName": "Accent colour", "name": "accent", "kind": "Measure", "description": "Optional. Hex string (e.g. #d4920a) or numeric driving palette index." },
+    { "displayName": "Sort order", "name": "sortOrder", "kind": "Measure", "description": "Optional numeric sort key (ascending)" },
+    { "displayName": "Card image", "name": "image", "kind": "Measure", "description": "Optional URL or base64 data URL for a per-card image", "requiredTypes": [{ "text": true }] },
+    { "displayName": "Card width (1-12)", "name": "widthSpan", "kind": "Measure", "description": "Optional integer 1-12. How many grid columns this card spans (when Layout > Columns is a fixed number 6/12).", "requiredTypes": [{ "numeric": true }] },
+    { "displayName": "Card height (1-4)", "name": "heightSpan", "kind": "Measure", "description": "Optional integer 1-4. How many grid rows this card spans.", "requiredTypes": [{ "numeric": true }] },
+    { "displayName": "Tooltips", "name": "tooltips", "kind": "Measure", "description": "Extra fields shown in the hover tooltip" }
+  ],
+  "dataViewMappings": [
+    {
+      "conditions": [
+        {
+          "cardLabel": { "max": 1 }, "headline": { "max": 1 }, "subtitle": { "max": 1 },
+          "change": { "max": 1 }, "direction": { "max": 1 }, "accent": { "max": 1 },
+          "sortOrder": { "max": 1 }, "image": { "max": 1 }, "widthSpan": { "max": 1 }, "heightSpan": { "max": 1 }
+        }
+      ],
+      "categorical": {
+        "categories": {
+          "for": { "in": "cardLabel" },
+          "dataReductionAlgorithm": { "top": { "count": 30000 } }
+        },
+        "values": {
+          "select": [
+            { "bind": { "to": "headline" } },
+            { "bind": { "to": "subtitle" } },
+            { "bind": { "to": "change" } },
+            { "bind": { "to": "direction" } },
+            { "bind": { "to": "accent" } },
+            { "bind": { "to": "sortOrder" } },
+            { "bind": { "to": "image" } },
+            { "bind": { "to": "widthSpan" } },
+            { "bind": { "to": "heightSpan" } },
+            { "for": { "in": "tooltips" } }
+          ]
+        }
+      }
+    }
+  ],
+  "objects": {
+    "titleSettings": {
+      "displayName": "Visual Title",
+      "properties": {
+        "showTitle": { "displayName": "Show Title", "type": { "bool": true } },
+        "titleText": { "displayName": "Title Text", "type": { "text": true } },
+        "titleFontFamily": { "displayName": "Font Family", "type": { "formatting": { "fontFamily": true } } },
+        "titleFontSize": { "displayName": "Font Size", "type": { "formatting": { "fontSize": true } } },
+        "titleBold": { "displayName": "Bold", "type": { "bool": true } },
+        "titleItalic": { "displayName": "Italic", "type": { "bool": true } },
+        "titleUnderline": { "displayName": "Underline", "type": { "bool": true } },
+        "titleAlign": { "displayName": "Alignment", "type": { "formatting": { "alignment": true } } },
+        "titleColor": { "displayName": "Font Color", "type": { "fill": { "solid": { "color": true } } } }
+      }
+    },
+    "layout": {
+      "displayName": "Layout",
+      "properties": {
+        "columnsMode": { "displayName": "Columns", "type": { "enumeration": [
+          { "displayName": "Auto-fit", "value": "auto" },
+          { "displayName": "1", "value": "1" },
+          { "displayName": "2", "value": "2" },
+          { "displayName": "3", "value": "3" },
+          { "displayName": "4", "value": "4" },
+          { "displayName": "5", "value": "5" },
+          { "displayName": "6", "value": "6" }
+        ]}},
+        "minCardWidth": { "displayName": "Min card width (px)", "type": { "numeric": true } },
+        "cardGap": { "displayName": "Gap (px)", "type": { "numeric": true } },
+        "outerPadding": { "displayName": "Outer padding (px)", "type": { "numeric": true } },
+        "aspectRatio": { "displayName": "Aspect ratio", "type": { "enumeration": [
+          { "displayName": "Free", "value": "free" },
+          { "displayName": "Square", "value": "square" },
+          { "displayName": "Wide (16:9)", "value": "wide" },
+          { "displayName": "Tall (3:4)", "value": "tall" }
+        ]}}
+      }
+    },
+    "cardStyle": {
+      "displayName": "Card Style",
+      "properties": {
+        "background": { "displayName": "Background", "type": { "fill": { "solid": { "color": true } } } },
+        "borderRadius": { "displayName": "Border radius (px)", "type": { "numeric": true } },
+        "borderColor": { "displayName": "Border colour", "type": { "fill": { "solid": { "color": true } } } },
+        "borderWidth": { "displayName": "Border width (px)", "type": { "numeric": true } },
+        "shadow": { "displayName": "Drop shadow", "type": { "bool": true } },
+        "accentPosition": { "displayName": "Accent stripe", "type": { "enumeration": [
+          { "displayName": "None", "value": "none" },
+          { "displayName": "Top", "value": "top" },
+          { "displayName": "Left", "value": "left" },
+          { "displayName": "Bottom", "value": "bottom" }
+        ]}},
+        "accentWidth": { "displayName": "Accent width (px)", "type": { "numeric": true } },
+        "cardPadding": { "displayName": "Inner padding (px)", "type": { "numeric": true } }
+      }
+    },
+    "headlineStyle": {
+      "displayName": "Headline Value",
+      "properties": {
+        "fontFamily": { "displayName": "Font Family", "type": { "formatting": { "fontFamily": true } } },
+        "fontSize": { "displayName": "Font Size", "type": { "formatting": { "fontSize": true } } },
+        "bold": { "displayName": "Bold", "type": { "bool": true } },
+        "italic": { "displayName": "Italic", "type": { "bool": true } },
+        "color": { "displayName": "Color", "type": { "fill": { "solid": { "color": true } } } },
+        "useAccentColor": { "displayName": "Use accent colour", "type": { "bool": true } },
+        "align": { "displayName": "Alignment", "type": { "formatting": { "alignment": true } } }
+      }
+    },
+    "labelStyle": {
+      "displayName": "Card Label",
+      "properties": {
+        "fontFamily": { "displayName": "Font Family", "type": { "formatting": { "fontFamily": true } } },
+        "fontSize": { "displayName": "Font Size", "type": { "formatting": { "fontSize": true } } },
+        "bold": { "displayName": "Bold", "type": { "bool": true } },
+        "color": { "displayName": "Color", "type": { "fill": { "solid": { "color": true } } } },
+        "uppercase": { "displayName": "Uppercase", "type": { "bool": true } },
+        "align": { "displayName": "Alignment", "type": { "formatting": { "alignment": true } } }
+      }
+    },
+    "subtitleStyle": {
+      "displayName": "Subtitle",
+      "properties": {
+        "fontSize": { "displayName": "Font Size", "type": { "formatting": { "fontSize": true } } },
+        "color": { "displayName": "Color", "type": { "fill": { "solid": { "color": true } } } },
+        "align": { "displayName": "Alignment", "type": { "formatting": { "alignment": true } } }
+      }
+    },
+    "changeStyle": {
+      "displayName": "Change Pill",
+      "properties": {
+        "show": { "displayName": "Show", "type": { "bool": true } },
+        "fontSize": { "displayName": "Font Size", "type": { "formatting": { "fontSize": true } } },
+        "positiveColor": { "displayName": "Positive colour", "type": { "fill": { "solid": { "color": true } } } },
+        "negativeColor": { "displayName": "Negative colour", "type": { "fill": { "solid": { "color": true } } } },
+        "neutralColor": { "displayName": "Neutral colour", "type": { "fill": { "solid": { "color": true } } } },
+        "upIsGood": { "displayName": "Up is good", "type": { "bool": true } },
+        "showArrow": { "displayName": "Show arrow", "type": { "bool": true } },
+        "align": { "displayName": "Alignment", "type": { "formatting": { "alignment": true } } }
+      }
+    },
+    "imageStyle": {
+      "displayName": "Card Image",
+      "properties": {
+        "show": { "displayName": "Show", "type": { "bool": true } },
+        "position": { "displayName": "Position", "type": { "enumeration": [
+          { "displayName": "Top", "value": "top" },
+          { "displayName": "Left", "value": "left" },
+          { "displayName": "Right", "value": "right" },
+          { "displayName": "Background", "value": "background" }
+        ]}},
+        "size": { "displayName": "Size (px)", "type": { "numeric": true } },
+        "shape": { "displayName": "Shape", "type": { "enumeration": [
+          { "displayName": "Square", "value": "square" },
+          { "displayName": "Rounded", "value": "rounded" },
+          { "displayName": "Circle", "value": "circle" }
+        ]}},
+        "fit": { "displayName": "Fit", "type": { "enumeration": [
+          { "displayName": "Contain", "value": "contain" },
+          { "displayName": "Cover", "value": "cover" }
+        ]}},
+        "opacity": { "displayName": "Opacity (background only, 0-100)", "type": { "numeric": true } }
+      }
+    },
+    "animation": {
+      "displayName": "Animation",
+      "properties": {
+        "enable": { "displayName": "Enable", "type": { "bool": true } },
+        "staggerMs": { "displayName": "Stagger (ms)", "type": { "numeric": true } }
+      }
+    }
+  },
+  "supportsHighlight": true,
+  "supportsKeyboardFocus": true,
+  "supportsLandingPage": true,
+  "supportsEmptyDataView": true,
+  "supportsMultiVisualSelection": true,
+  "tooltips": {
+    "supportedTypes": { "default": true, "canvas": true },
+    "roles": ["tooltips"]
+  },
+  "privileges": []
+}
