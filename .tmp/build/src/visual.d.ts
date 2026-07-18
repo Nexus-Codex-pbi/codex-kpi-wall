@@ -17,6 +17,7 @@ export declare class Visual implements IVisual {
     private hcForeground;
     private hcBackground;
     private cornerSignature;
+    private highlightActive;
     constructor(options: VisualConstructorOptions);
     update(options: VisualUpdateOptions): void;
     /** Untouched default ink flips to the dark-theme token (suite sentinel

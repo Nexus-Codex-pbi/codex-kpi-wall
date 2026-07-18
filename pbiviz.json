@@ -4,7 +4,7 @@
     "displayName": "Codex KPI Wall",
     "guid": "codexKpiWall2186C269C9014BAE9C5B72F04EC461F7",
     "visualClassName": "Visual",
-    "version": "1.0.0.3",
+    "version": "1.0.0.4",
     "description": "Multi-card KPI grid with auto-fit responsive layout, per-card accent driver, change pills, and subtle data-update shine animation.",
     "supportUrl": "https://nexuscodex.nexus/support",
     "gitHubUrl": ""
@@ -16,5 +16,5 @@
   "style": "style/visual.less",
   "capabilities": "capabilities.json",
   "stringResources": ["stringResources/en-US/resources.resjson"],
-  "version": "1.0.0.3"
+  "version": "1.0.0.4"
 }

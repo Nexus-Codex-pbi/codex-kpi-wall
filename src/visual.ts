@@ -37,6 +37,7 @@ function themeFor(hex: string): Theme {
 interface CardData {
     label: string;
     headline: number | null;
+    highlight: number | null;   // cross-highlight value from another visual
     headlineFormat: string | null;
     subtitle: string | null;
     change: number | null;
@@ -67,6 +68,7 @@ export class Visual implements IVisual {
     private hcForeground = "";
     private hcBackground = "";
     private cornerSignature: CardSignatureHandle | null = null;
+    private highlightActive = false;
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -145,6 +147,9 @@ export class Visual implements IVisual {
 
             // Title (always renders if enabled, even on landing — keeps cert in scope)
             this.renderTitle(theme);
+
+            this.highlightActive = !!dv?.categorical?.values?.find(
+                v => v.source.roles && v.source.roles["headline"])?.highlights;
 
             const cards = dv ? this.parseCards(dv) : [];
             if (cards.length === 0) {
@@ -226,6 +231,9 @@ export class Visual implements IVisual {
             const headlineRaw = headlineCol.values?.[i];
             const headline = (typeof headlineRaw === "number") ? headlineRaw : (headlineRaw == null ? null : Number(headlineRaw));
 
+            const hiRaw = headlineCol.highlights?.[i];
+            const highlight = (typeof hiRaw === "number") ? hiRaw : (hiRaw == null ? null : Number(hiRaw));
+
             const subtitleRaw = subtitleCol?.values?.[i];
             const subtitle = subtitleRaw == null ? null : String(subtitleRaw);
 
@@ -273,6 +281,7 @@ export class Visual implements IVisual {
             cards.push({
                 label,
                 headline,
+                highlight: (highlight != null && isFinite(highlight)) ? highlight : null,
                 headlineFormat: headlineCol.source.format ?? null,
                 subtitle,
                 change,
@@ -375,6 +384,10 @@ export class Visual implements IVisual {
         if (cs.shadow.value) cardEl.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)";
         if (aspectRatio) cardEl.style.aspectRatio = aspectRatio;
 
+        // Cross-highlight: cards with no contribution to the selection dim;
+        // contributing cards show the highlighted value in the headline.
+        if (this.highlightActive && card.highlight == null) cardEl.style.opacity = "0.35";
+
         // Per-card grid spans (optional, driven by widthSpan / heightSpan measures)
         if (card.widthSpan && card.widthSpan > 1) {
             cardEl.style.gridColumn = `span ${card.widthSpan}`;
@@ -440,7 +453,8 @@ export class Visual implements IVisual {
 
         const headlineEl = document.createElement("div");
         headlineEl.className = "kpi-wall-card-headline";
-        headlineEl.textContent = card.headline == null ? "—" : this.formatValue(card.headline, card.headlineFormat);
+        const shownHeadline = (this.highlightActive && card.highlight != null) ? card.highlight : card.headline;
+        headlineEl.textContent = shownHeadline == null ? "—" : this.formatValue(shownHeadline, card.headlineFormat);
         if (hs.fontFamily.value) headlineEl.style.fontFamily = hs.fontFamily.value;
         if (hs.fontSize.value) headlineEl.style.fontSize = `${hs.fontSize.value}px`;
         headlineEl.style.fontWeight = hs.bold.value ? "700" : "500";
