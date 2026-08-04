@@ -240,9 +240,15 @@ export class Visual implements IVisual {
         grid.className = "kw-grid";
         grid.style.gap = `${gap}px`;
         grid.style.padding = `${Math.max(8, gap)}px`;
+        // Policy 1180.2.2 — a fixed column count used minmax(0, 1fr), which lets
+        // columns collapse to nothing: at small widths the cards squashed to
+        // unreadable slivers instead of overflowing, so no horizontal scrollbar
+        // ever appeared. Honour minCardWidth in both modes — if the user asked for
+        // N columns, give them N columns at a readable width and let the root
+        // scroll, rather than silently shrinking the content away.
         grid.style.gridTemplateColumns = colsMode === "auto"
             ? `repeat(auto-fit, minmax(${minWidth}px, 1fr))`
-            : `repeat(${colsMode}, minmax(0, 1fr))`;
+            : `repeat(${colsMode}, minmax(${minWidth}px, 1fr))`;
 
         cards.forEach((card, i) => grid.appendChild(this.renderCard(card, i, theme)));
         this.rootDiv.appendChild(grid);

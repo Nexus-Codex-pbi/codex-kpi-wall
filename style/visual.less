@@ -7,7 +7,13 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    overflow: hidden;
+    /* Policy 1180.2.2 Core Functions — this element is THE SCROLLER. The host
+     * element (this.target) is overflow:hidden by design; if this one is hidden
+     * too, nothing scrolls and shrinking the visual just clips the cards, which
+     * is the 04/08/2026 cert finding ("some data becomes hidden"). Cards carry
+     * min-height/min-width so there is real overflow to scroll to.
+     * Matches _template-codex/style/visual.less — do not set this to hidden. */
+    overflow: auto;
     font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
 }
 
