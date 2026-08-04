@@ -1,0 +1,23 @@
+Codex KPI Wall v1.1.0.3 - resubmission after the 04/08/2026 review (Policy 1180.2.2 Core Functions).
+(Exact text pasted into Partner Center 04/08/2026. Notes are NOT retained across
+resubmissions and the field caps at 2500 characters.)
+
+Source code repository: https://github.com/Nexus-Codex-pbi/codex-kpi-wall
+No test account, licence key or in-app purchase required. All functionality is in the attached sample .pbix.
+
+REPORTED
+"When the visual is resized to a smaller dimension, some data becomes hidden. Please implement horizontal and vertical scrollbars as needed to ensure all data remains accessible and visible during resizing."
+
+CAUSE
+The visual's root container was set to overflow:hidden. The host element is also overflow:hidden, so with both hidden nothing could scroll and shrinking the visual clipped the KPI cards rather than scrolling to them. The cards carry a min-height of 158px, so there was always real content beyond the viewport - it was simply being cut off rather than reached.
+
+FIX 1 - The root container is now the scroller (overflow:auto). Both horizontal and vertical scrollbars appear as needed, and every card remains reachable at any visual size. Cards keep their minimum dimensions rather than being squashed to illegibility.
+
+FIX 2 - The same finding existed in a second, less obvious form. With a fixed column count the grid used minmax(0, 1fr), which allows columns to collapse to zero width: at small sizes cards were compressed to unreadable slivers instead of overflowing, so no horizontal scrollbar was ever triggered. Both the automatic and fixed column modes now honour the Minimum Card Width setting, so a user who asks for N columns gets N columns at a readable width and the container scrolls.
+
+TO VERIFY
+Resize the visual to a small dimension in the sample report. Vertical and horizontal scrollbars appear as required and all KPI cards remain accessible. Switching Columns between Auto and a fixed count behaves the same way.
+
+No capabilities.json change - no data role, mapping or property was added, removed or altered.
+
+supportsHighlight is declared false deliberately: declaring it true without honouring the highlight array in the renderer is itself a 1180.2.2 finding. It will be set when the renderer genuinely dims un-highlighted cards.
