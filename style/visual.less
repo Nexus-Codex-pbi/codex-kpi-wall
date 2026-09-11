@@ -161,5 +161,9 @@
 
 /* Per-cell empty state (board .k2.nd) */
 .kw-nd { justify-content: center; align-items: flex-start; }
+/* The no-data cell keeps its category header (NEXUS cycle-08 §4). The card's
+ * align-items:flex-start would otherwise shrink that row to its content and
+ * pull the status dot in beside the label instead of to the far edge. */
+.kw-nd .kw-head { align-self: stretch; }
 .kw-ndv { font-size: 34px; font-weight: 700; opacity: 0.5; line-height: 1; }
 .kw-ndt { font-size: 12.5px; margin-top: 8px; }

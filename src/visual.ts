@@ -325,7 +325,6 @@ export class Visual implements IVisual {
         const surf = surfaceTokens(theme);
         const accentStyle = String(kw.accentStyle.value?.value || "cornerBracket");
         const twoCorners = accentStyle === "cornerBracket" && String(kw.corners.value?.value || "two") === "two";
-        const glow = !hc && theme === "dark";
 
         // ONE reading drives the WHOLE cell. The headline used to come from the
         // highlight while the band colour, delta pill, target strip and tooltip
@@ -334,11 +333,19 @@ export class Visual implements IVisual {
         // (NEXUS cycle-08 §1). Recompute everything from the highlighted
         // reading; a card with no highlight keeps its own value and dims.
         const reading = this.readingOf(card);
+        const isEmpty = reading == null;
         const hasTarget = card.target != null && card.target > 0;
         // Band law: no target reads neutral — the brand accent, not a verdict.
+        // A MISSING value is not a missed target: band() was being handed NaN
+        // and returning "danger", so a no-data cell kept a danger-coloured
+        // corner that read as a failed KPI (NEXUS cycle-08 §4). No reading ->
+        // the muted token, and no glow, the same "muted" treatment the shared
+        // card signature uses for an absent value.
         const bandHex = hc ? this.hcForeground
-            : hasTarget ? bandColor(band(reading ?? NaN, card.target as number), theme)
+            : isEmpty ? surf.muted
+            : hasTarget ? bandColor(band(reading as number, card.target as number), theme)
             : accentToken(theme);
+        const glow = !hc && theme === "dark" && !isEmpty;
 
         const el = document.createElement("div");
         el.className = `kw-card kw-${accentStyle}`;
@@ -371,27 +378,11 @@ export class Visual implements IVisual {
             el.appendChild(c2);
         }
 
-        // Per-cell empty state (board .k2.nd) — value missing in the filter.
-        if (reading == null) {
-            el.classList.add("kw-nd");
-            bar.style.background = hc ? this.hcForeground : surf.muted;
-            bar.style.opacity = "0.35";
-            bar.style.boxShadow = "none";
-            const ndv = document.createElement("div");
-            ndv.className = "kw-ndv";
-            ndv.style.color = hc ? this.hcForeground : surf.muted;
-            ndv.textContent = "— —";
-            const ndt = document.createElement("div");
-            ndt.className = "kw-ndt";
-            ndt.style.color = hc ? this.hcForeground : surf.muted;
-            ndt.textContent = "No data in current filter";
-            el.appendChild(ndv);
-            el.appendChild(ndt);
-            this.wireCard(el, index, card);
-            return el;
-        }
-
-        // Head: eyebrow label + beveled status dot.
+        // Head: eyebrow label + beveled status dot. Built BEFORE the empty
+        // branch — it used to be built after it, so a cell whose value was
+        // missing in the current filter lost its category name entirely and
+        // rendered only "— — / No data in current filter" while its tooltip
+        // still knew the category (NEXUS cycle-08 §4).
         const head = document.createElement("div");
         head.className = "kw-head";
         const eye = document.createElement("span");
@@ -412,6 +403,26 @@ export class Visual implements IVisual {
             head.appendChild(dot);
         }
         el.appendChild(head);
+
+        // Per-cell empty state (board .k2.nd) — value missing in the filter.
+        if (isEmpty) {
+            el.classList.add("kw-nd");
+            bar.style.background = hc ? this.hcForeground : surf.muted;
+            bar.style.opacity = "0.35";
+            bar.style.boxShadow = "none";
+            const ndv = document.createElement("div");
+            ndv.className = "kw-ndv";
+            ndv.style.color = hc ? this.hcForeground : surf.muted;
+            ndv.textContent = "— —";
+            const ndt = document.createElement("div");
+            ndt.className = "kw-ndt";
+            ndt.style.color = hc ? this.hcForeground : surf.muted;
+            ndt.textContent = "No data in current filter";
+            el.appendChild(ndv);
+            el.appendChild(ndt);
+            this.wireCard(el, index, card);
+            return el;
+        }
 
         // Value — cross-highlight shows the highlighted number, and so does
         // every verdict below it (see `reading`).
