@@ -54,6 +54,11 @@ interface CardData {
     highlight: number | null;
     sortOrder: number | null;
     valueFormat: string | null;
+    /** Target's OWN model format. CardData kept only Value's, and the footer
+     *  used it for the target: value 0.8 as `0.00` beside target 0.9 as `0.0%`
+     *  printed "to target 0.90" while the tooltip correctly said 90.0%
+     *  (NEXUS cycle-08 §6). */
+    targetFormat: string | null;
     /** An INDEPENDENT comparison (e.g. vs prior period), when the optional
      *  Change Value well is bound. Distinct from the value/target ratio: a card
      *  can be below target AND improving, and Wall could express neither
@@ -299,6 +304,7 @@ export class Visual implements IVisual {
                 .createSelectionId();
 
             const fmt = valueCol.source.format ?? null;
+            const targetFormat = targetCol?.source.format ?? null;
             const tooltipItems: VisualTooltipDataItem[] = [
                 { displayName: labels.source.displayName || "Card", value: label },
             ];
@@ -314,7 +320,7 @@ export class Visual implements IVisual {
             if (highlighting && value != null && value !== highlight) {
                 tooltipItems.push({ displayName: `${valueCol.source.displayName} (unfiltered)`, value: this.formatValue(value, fmt) });
             }
-            if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetCol!.source.format ?? fmt) });
+            if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetFormat ?? fmt) });
             const changeReading = (this.highlightActive && changeHighlight != null) ? changeHighlight : changeValue;
             if (changeReading != null) {
                 tooltipItems.push({
@@ -328,7 +334,7 @@ export class Visual implements IVisual {
             }
 
             out.push({
-                label, value, target, highlight, sortOrder, valueFormat: fmt,
+                label, value, target, highlight, sortOrder, valueFormat: fmt, targetFormat,
                 changeValue, changeHighlight, changeLabel, changeFormat,
                 selectionId, tooltipItems,
             });
@@ -586,7 +592,7 @@ export class Visual implements IVisual {
                 const sub = document.createElement("span");
                 sub.className = "kw-sub";
                 sub.style.color = hc ? this.hcForeground : surf.muted;
-                sub.textContent = `${delta >= 0 ? "vs" : "to"} target ${this.formatValue(card.target as number, card.valueFormat)}`;
+                sub.textContent = `${delta >= 0 ? "vs" : "to"} target ${this.formatValue(card.target as number, card.targetFormat ?? card.valueFormat)}`;
                 foot.appendChild(sub);
             }
             footWrap.appendChild(foot);
@@ -614,7 +620,7 @@ export class Visual implements IVisual {
         // facts the cell shows — category, reading, and the target it is
         // judged against.
         const ariaLabel = hasTarget
-            ? `${card.label}: ${val.textContent}, target ${this.formatValue(card.target as number, card.valueFormat)}`
+            ? `${card.label}: ${val.textContent}, target ${this.formatValue(card.target as number, card.targetFormat ?? card.valueFormat)}`
             : `${card.label}: ${val.textContent}`;
         this.wireCard(el, index, card, ariaLabel, focusRing);
         return el;
@@ -788,7 +794,11 @@ export class Visual implements IVisual {
         if (n == null || !isFinite(n)) return String(n ?? "");
         // Optional `#` digits are honoured: a single derived count used as both
         // min and max rendered `0.##` 12.34 as "12" (NEXUS cycle-02 F3).
-        return formatModelNumber(n, format);
+        // The HOST LOCALE is passed too — it was omitted, so grouping and the
+        // decimal separator were the JS engine default rather than the
+        // report's, which is the other half of "complete model-format
+        // handling" (NEXUS cycle-08 §5). KPI Card already passes it.
+        return formatModelNumber(n, format, this.host?.locale);
     }
 
     public getFormattingModel(): powerbi.visuals.FormattingModel {
