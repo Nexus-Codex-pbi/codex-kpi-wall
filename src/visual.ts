@@ -331,13 +331,14 @@ export class Visual implements IVisual {
             const value = num(valueCol.values?.[i]);
             const target = num(targetCol?.values?.[i]);
             const highlight = num(valueCol.highlights?.[i]);
+            const highlighting = this.highlightActive && highlight != null;
             const sortOrder = num(sortCol?.values?.[i]);
             const changeValue = num(changeCol?.values?.[i]);
             // The change measure follows the SAME population as the headline
             // under a cross-highlight (NEXUS cycle-08 §1) — one cell, one
             // reading, everywhere.
             const changeHighlight = num(changeCol?.highlights?.[i]);
-            const rawChangeLabel = changeLabelCol?.values?.[i];
+            const rawChangeLabel = highlighting ? changeLabelCol?.highlights?.[i] : changeLabelCol?.values?.[i];
             const changeLabel = rawChangeLabel == null || String(rawChangeLabel).trim() === ""
                 ? null : String(rawChangeLabel);
             const changeFormat = changeCol?.source.format ?? null;
@@ -357,11 +358,11 @@ export class Visual implements IVisual {
             // highlighted headline, labelling two different populations as the
             // same reading (NEXUS cycle-08 §1). The total is still available,
             // under its own explicit name.
-            const highlighting = this.highlightActive && highlight != null;
             const reading = highlighting ? highlight : value;
             const rawValue = valueCol.values?.[i] ?? null;
-            if (this.valueFormatType() === "text" && typeof rawValue === "string" && !highlighting) {
-                tooltipItems.push({ displayName: valueCol.source.displayName, value: rawValue });
+            if (this.valueFormatType() === "text") {
+                const text = this.textOf({ rawValue, highlight });
+                if (text != null) tooltipItems.push({ displayName: valueCol.source.displayName, value: text });
             } else if (reading != null) {
                 tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(reading, fmt) });
             }
@@ -369,7 +370,7 @@ export class Visual implements IVisual {
                 tooltipItems.push({ displayName: `${valueCol.source.displayName} (unfiltered)`, value: this.formatValue(value, fmt) });
             }
             if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetFormat ?? fmt) });
-            const changeReading = (this.highlightActive && changeHighlight != null) ? changeHighlight : changeValue;
+            const changeReading = highlighting ? changeHighlight : changeValue;
             if (changeReading != null) {
                 tooltipItems.push({
                     displayName: changeCol!.source.displayName,
@@ -406,7 +407,12 @@ export class Visual implements IVisual {
 
     /** The independent comparison for a cell, on the same population. */
     private changeOf(card: CardData): number | null {
-        return (this.highlightActive && card.changeHighlight != null) ? card.changeHighlight : card.changeValue;
+        return (this.highlightActive && card.highlight != null) ? card.changeHighlight : card.changeValue;
+    }
+
+    private textOf(card: Pick<CardData, "rawValue" | "highlight">): string | null {
+        const raw = this.highlightActive && card.highlight != null ? card.highlight : card.rawValue;
+        return raw == null || String(raw) === "" ? null : String(raw);
     }
 
     /** The report's Direction Logic. "Up is Good" is the declared default and
@@ -531,8 +537,7 @@ export class Visual implements IVisual {
         // Only reachable when the report explicitly selects Format: Text.
         const formatType = this.valueFormatType();
         const textMode = formatType === "text";
-        const textValue = textMode && card.rawValue != null && String(card.rawValue) !== ""
-            ? String(card.rawValue) : null;
+        const textValue = textMode ? this.textOf(card) : null;
         const isEmpty = textMode ? textValue == null : reading == null;
         const hasTarget = !textMode && card.target != null && card.target > 0;
         // Band law: no target reads neutral — the brand accent, not a verdict.
