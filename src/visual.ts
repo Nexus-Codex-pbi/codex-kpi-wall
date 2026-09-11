@@ -717,7 +717,8 @@ export class Visual implements IVisual {
                 } else {
                     pillText = `${delta >= 0 ? "▲" : "▼"} ${(Math.abs(delta) * 100).toFixed(1)}%`;
                 }
-                pill.style.color = pillHex;
+                const pillSurface = compositeOver(pillHex, 85, surf.card);
+                pill.style.color = hc ? this.hcForeground : contrastInk(pillSurface, pillHex, surf.text);
                 pill.style.background = hc ? "transparent" : toRgba(pillHex, 85);
                 if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
                 pill.textContent = pillText;
