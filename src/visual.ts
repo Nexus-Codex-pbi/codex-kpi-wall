@@ -29,7 +29,7 @@ import DataView = powerbi.DataView;
 import { VisualFormattingSettingsModel, textAlignFor } from "./settings";
 
 import { toRgba } from "./shared/colorHelpers";
-import { Theme, band, bandColor, accentToken } from "./shared/bandEngine";
+import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
@@ -54,6 +54,14 @@ interface CardData {
     highlight: number | null;
     sortOrder: number | null;
     valueFormat: string | null;
+    /** An INDEPENDENT comparison (e.g. vs prior period), when the optional
+     *  Change Value well is bound. Distinct from the value/target ratio: a card
+     *  can be below target AND improving, and Wall could express neither
+     *  separately (NEXUS cycle-08 parity gap 1). */
+    changeValue: number | null;
+    changeHighlight: number | null;
+    changeLabel: string | null;
+    changeFormat: string | null;
     selectionId: ISelectionId;
     tooltipItems: VisualTooltipDataItem[];
 }
@@ -259,6 +267,8 @@ export class Visual implements IVisual {
         const valueCol = findCol("value");
         const targetCol = findCol("target");
         const sortCol = findCol("sortOrder");
+        const changeCol = findCol("changeValue");
+        const changeLabelCol = findCol("changeLabel");
         const tooltipCols = valuesArr.filter(v => v.source.roles && v.source.roles["tooltips"]);
         if (!valueCol) return [];
 
@@ -275,6 +285,14 @@ export class Visual implements IVisual {
             const target = num(targetCol?.values?.[i]);
             const highlight = num(valueCol.highlights?.[i]);
             const sortOrder = num(sortCol?.values?.[i]);
+            const changeValue = num(changeCol?.values?.[i]);
+            // The change measure follows the SAME population as the headline
+            // under a cross-highlight (NEXUS cycle-08 §1) — one cell, one
+            // reading, everywhere.
+            const changeHighlight = num(changeCol?.highlights?.[i]);
+            const rawChangeLabel = changeLabelCol?.values?.[i];
+            const changeLabel = rawChangeLabel == null ? null : String(rawChangeLabel);
+            const changeFormat = changeCol?.source.format ?? null;
 
             const selectionId = this.host.createSelectionIdBuilder()
                 .withCategory(labels, i)
@@ -297,12 +315,23 @@ export class Visual implements IVisual {
                 tooltipItems.push({ displayName: `${valueCol.source.displayName} (unfiltered)`, value: this.formatValue(value, fmt) });
             }
             if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetCol!.source.format ?? fmt) });
+            const changeReading = (this.highlightActive && changeHighlight != null) ? changeHighlight : changeValue;
+            if (changeReading != null) {
+                tooltipItems.push({
+                    displayName: changeCol!.source.displayName,
+                    value: changeLabel ?? this.formatChange(changeReading, changeFormat),
+                });
+            }
             for (const tc of tooltipCols) {
                 const tv = tc.values?.[i];
                 if (tv != null) tooltipItems.push({ displayName: tc.source.displayName, value: this.formatValue(tv as number, tc.source.format ?? null) });
             }
 
-            out.push({ label, value, target, highlight, sortOrder, valueFormat: fmt, selectionId, tooltipItems });
+            out.push({
+                label, value, target, highlight, sortOrder, valueFormat: fmt,
+                changeValue, changeHighlight, changeLabel, changeFormat,
+                selectionId, tooltipItems,
+            });
         }
 
         if (out.some(c => c.sortOrder != null)) {
@@ -316,6 +345,38 @@ export class Visual implements IVisual {
      *  contribute to keeps its own value and dims (NEXUS cycle-08 §1). */
     private readingOf(card: CardData): number | null {
         return (this.highlightActive && card.highlight != null) ? card.highlight : card.value;
+    }
+
+    /** The independent comparison for a cell, on the same population. */
+    private changeOf(card: CardData): number | null {
+        return (this.highlightActive && card.changeHighlight != null) ? card.changeHighlight : card.changeValue;
+    }
+
+    /** The report's Direction Logic. "Up is Good" is the declared default and
+     *  is the wall's original fixed higher-is-better rule verbatim. */
+    private directionPolicy(): string {
+        return String(this.formattingSettings?.changeSettings?.changeDirection?.value?.value || "upIsGood");
+    }
+
+    /** The verdict band for a value against a target UNDER the direction
+     *  policy. Higher-is-better is the shipped ratio; lower-is-better inverts
+     *  it, so a cost of 80 against a budget of 100 reads as success instead of
+     *  danger (NEXUS cycle-08 parity gap 2). Neutral has no verdict at all and
+     *  is handled by the caller. */
+    private targetBand(reading: number, target: number, direction: string): Band {
+        return direction === "downIsGood" ? band(target, reading) : band(reading, target);
+    }
+
+    /** The pill's number when no Change Label is bound. The arrow carries the
+     *  sign, so the magnitude prints unsigned. A change measure with its own
+     *  model format is rendered through it; otherwise it is read as a fraction
+     *  and printed as a percentage to one decimal — the wall's existing pill
+     *  style. Deliberately NOT switched by magnitude: that is KPI Card's old
+     *  defect and this review says not to copy it. */
+    private formatChange(cv: number, format: string | null): string {
+        const abs = Math.abs(cv);
+        if (format) return formatModelNumber(abs, format, this.host.locale);
+        return `${(abs * 100).toFixed(1)}%`;
     }
 
     // ─── Render ────────────────────────────────────────────────
@@ -369,9 +430,18 @@ export class Visual implements IVisual {
         // corner that read as a failed KPI (NEXUS cycle-08 §4). No reading ->
         // the muted token, and no glow, the same "muted" treatment the shared
         // card signature uses for an absent value.
+        // Direction Logic (NEXUS cycle-08 parity gap 2). "Up is Good" is the
+        // default and is band(reading, target) — the original fixed rule.
+        // "Down is Good" inverts the ratio so a cost/defect/elapsed-time wall
+        // can read a figure under target as success. "Neutral" states no
+        // verdict and falls back to the brand accent.
+        const direction = this.directionPolicy();
+        const verdict: Band | null = (!isEmpty && hasTarget && direction !== "neutral")
+            ? this.targetBand(reading as number, card.target as number, direction)
+            : null;
         const bandHex = hc ? this.hcForeground
             : isEmpty ? surf.muted
-            : hasTarget ? bandColor(band(reading as number, card.target as number), theme)
+            : verdict ? bandColor(verdict, theme)
             : accentToken(theme);
         const glow = !hc && theme === "dark" && !isEmpty;
         // Keyboard focus ring colour — a painted surface, so it takes the
@@ -468,23 +538,51 @@ export class Visual implements IVisual {
         val.style.color = hc ? this.hcForeground : (vs.color.value?.value || surf.text);
         el.appendChild(val);
 
-        // Foot: delta pill (value vs target — the band law, not raw direction)
-        // + target line + quantised strip.
+        // Foot: the comparison pill + target line + quantised strip.
+        //
+        // The pill used to be value/target-1 ALWAYS, so a card could not show
+        // "improving vs prior" while still being under target — the two are
+        // different questions and neither should silently replace the other
+        // (NEXUS cycle-08 parity gap 1). When the optional Change Value well is
+        // bound the pill reports THAT, coloured by Direction Logic, and Target
+        // keeps the band colour, target line and strip. With no Change Value
+        // bound this is the original target ratio, unchanged.
+        const changeReading = this.changeOf(card);
+        const hasChange = changeReading != null;
+        const pillOn = kw.showPill.value && (hasChange || hasTarget);
+        const subOn = kw.showSub.value && hasTarget;
         const footWrap = document.createElement("div");
-        if (hasTarget && (kw.showPill.value || kw.showSub.value)) {
+        if (pillOn || subOn) {
             const foot = document.createElement("div");
             foot.className = "kw-foot";
-            const delta = (reading as number) / (card.target as number) - 1;
-            if (kw.showPill.value) {
+            const delta = hasTarget ? (reading as number) / (card.target as number) - 1 : 0;
+            if (pillOn) {
                 const pill = document.createElement("span");
                 pill.className = "kw-pill";
-                pill.style.color = bandHex;
-                pill.style.background = hc ? "transparent" : toRgba(bandHex, 85);
+                let pillHex = bandHex;
+                let pillText: string;
+                if (hasChange) {
+                    const cv = changeReading as number;
+                    // A change is a DIRECTION read, judged by the policy — not
+                    // the target ratio. Neutral states no verdict.
+                    const good = direction === "upIsGood" ? cv >= 0 : cv < 0;
+                    pillHex = hc ? this.hcForeground
+                        : direction === "neutral" ? surf.muted
+                        : bandColor(good ? "success" : "danger", theme);
+                    const arrow = cv >= 0 ? "▲" : "▼";
+                    pillText = card.changeLabel != null
+                        ? `${arrow} ${card.changeLabel}`
+                        : `${arrow} ${this.formatChange(cv, card.changeFormat)}`;
+                } else {
+                    pillText = `${delta >= 0 ? "▲" : "▼"} ${(Math.abs(delta) * 100).toFixed(1)}%`;
+                }
+                pill.style.color = pillHex;
+                pill.style.background = hc ? "transparent" : toRgba(pillHex, 85);
                 if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
-                pill.textContent = `${delta >= 0 ? "▲" : "▼"} ${(Math.abs(delta) * 100).toFixed(1)}%`;
+                pill.textContent = pillText;
                 foot.appendChild(pill);
             }
-            if (kw.showSub.value) {
+            if (subOn) {
                 const sub = document.createElement("span");
                 sub.className = "kw-sub";
                 sub.style.color = hc ? this.hcForeground : surf.muted;
