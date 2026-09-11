@@ -26,14 +26,14 @@ import VisualTooltipDataItem = powerbi.extensibility.VisualTooltipDataItem;
 import ISandboxExtendedColorPalette = powerbi.extensibility.ISandboxExtendedColorPalette;
 import DataView = powerbi.DataView;
 
-import { VisualFormattingSettingsModel, textAlignFor } from "./settings";
+import { VisualFormattingSettingsModel, textAlignFor, marginsFor } from "./settings";
 
 import { toRgba } from "./shared/colorHelpers";
 import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
-import { applyBorder } from "./shared/borderSettings";
+import { applyBorder, resolveBorder, ResolvedBorder } from "./shared/borderSettings";
 import { LicenseGate } from "./shared/licensing";
 import { formatModelNumber } from "./shared/numberFormat";
 
@@ -54,6 +54,10 @@ interface CardData {
     highlight: number | null;
     sortOrder: number | null;
     valueFormat: string | null;
+    /** The headline exactly as the model delivered it, kept so a TEXT status
+     *  card ("On call") can render instead of the no-data cell that numeric
+     *  coercion produced (NEXUS cycle-08 parity gap 4). */
+    rawValue: powerbi.PrimitiveValue | null;
     /** Target's OWN model format. CardData kept only Value's, and the footer
      *  used it for the target: value 0.8 as `0.00` beside target 0.9 as `0.0%`
      *  printed "to target 0.90" while the tooltip correctly said 90.0%
@@ -111,6 +115,12 @@ export class Visual implements IVisual {
     /** Each rendered cell's selection identity, in render order — the context
      *  menu and the keyboard path both resolve a cell through this. */
     private cardIds: ISelectionId[] = [];
+    /** The PER-CARD border, resolved once per update. The shared Border card
+     *  paints the outside of the WALL; this one paints each cell (Neil,
+     *  2026-09-10: "border isn't per card but the whole block of cards, we need
+     *  both"). Null when the card is off — the theme-token cell border and the
+     *  stylesheet's 10px radius then stand, exactly as today. */
+    private cellBorderPaint: ResolvedBorder | null = null;
 
 
     constructor(options: VisualConstructorOptions) {
@@ -231,6 +241,10 @@ export class Visual implements IVisual {
                 palette: this.host.colorPalette,
                 metadataObjects: undefined,
             });
+            this.cellBorderPaint = resolveBorder(this.formattingSettings.cellBorder, {
+                hcActive: this.isHighContrast,
+                hcColor: this.hcForeground,
+            });
             applyCardSignature(this.cornerSignature, this.formattingSettings.cardSignature, {
                 autoHex: accentToken(theme),
                 hcActive: this.isHighContrast,
@@ -335,6 +349,7 @@ export class Visual implements IVisual {
 
             out.push({
                 label, value, target, highlight, sortOrder, valueFormat: fmt, targetFormat,
+                rawValue: valueCol.values?.[i] ?? null,
                 changeValue, changeHighlight, changeLabel, changeFormat,
                 selectionId, tooltipItems,
             });
@@ -371,6 +386,50 @@ export class Visual implements IVisual {
      *  is handled by the caller. */
     private targetBand(reading: number, target: number, direction: string): Band {
         return direction === "downIsGood" ? band(target, reading) : band(reading, target);
+    }
+
+    /** The Value Format card's explicit override, or null for "Model format" —
+     *  the default, which is the wall's existing model-format behaviour and is
+     *  what every saved report gets (NEXUS cycle-08 parity gap 4). */
+    private valueFormatType(): string {
+        return String(this.formattingSettings?.valueFormat?.valueFormatType?.value?.value || "auto");
+    }
+
+    /** The headline text under an explicit Value Format. Percent is a plain
+     *  x100 at every magnitude — KPI Card's percent helper changes
+     *  interpretation above 1 and this review says not to copy that. Currency
+     *  puts the sign OUTSIDE the symbol, matching shared/numberFormat.ts. */
+    private formatExplicit(n: number, type: string): string {
+        const vf = this.formattingSettings.valueFormat;
+        const digits = Math.max(0, Math.min(6, vf.decimalPlaces.value ?? 0));
+        const opts = { minimumFractionDigits: digits, maximumFractionDigits: digits };
+        const locale = this.host?.locale;
+        if (type === "percent") {
+            return `${(n * 100).toLocaleString(locale, { ...opts, useGrouping: false })}%`;
+        }
+        if (type === "currency") {
+            const symbol = (vf.currencySymbol.value || "$").trim();
+            const body = Math.abs(n).toLocaleString(locale, opts);
+            const sign = n < 0 && /[1-9]/.test(body) ? "-" : "";
+            return `${sign}${symbol}${body}`;
+        }
+        return n.toLocaleString(locale, opts);
+    }
+
+    /** Font/typography application shared by every text surface on a cell.
+     *  A size of 0 means "automatic" — the stylesheet's own value — which is
+     *  the idiom the Value and Label cards already use. */
+    private applyTypography(
+        el: HTMLElement,
+        style: { fontFamily?: { value?: string }; fontSize?: { value?: number };
+                 bold?: { value?: boolean }; italic?: { value?: boolean }; underline?: { value?: boolean } },
+        weights: { on: string; off: string }
+    ): void {
+        if (style.fontFamily?.value) el.style.fontFamily = style.fontFamily.value;
+        if (style.fontSize?.value) el.style.fontSize = `${style.fontSize.value}px`;
+        el.style.fontWeight = style.bold?.value ? weights.on : weights.off;
+        el.style.fontStyle = style.italic?.value ? "italic" : "normal";
+        el.style.textDecoration = style.underline?.value ? "underline" : "none";
     }
 
     /** The pill's number when no Change Label is bound. The arrow carries the
@@ -416,6 +475,8 @@ export class Visual implements IVisual {
         const kw = this.formattingSettings.kpiWall;
         const vs = this.formattingSettings.valueStyle;
         const ls = this.formattingSettings.labelStyle;
+        const cs = this.formattingSettings.changeSettings;
+        const ss = this.formattingSettings.subtitleStyle;
         const hc = this.isHighContrast;
         const surf = surfaceTokens(theme);
         const accentStyle = String(kw.accentStyle.value?.value || "cornerBracket");
@@ -428,8 +489,16 @@ export class Visual implements IVisual {
         // (NEXUS cycle-08 §1). Recompute everything from the highlighted
         // reading; a card with no highlight keeps its own value and dims.
         const reading = this.readingOf(card);
-        const isEmpty = reading == null;
-        const hasTarget = card.target != null && card.target > 0;
+        // A TEXT headline has no ratio, so it carries no verdict, pill or strip
+        // — but it is not "no data" either. Numeric coercion used to send every
+        // text status card to the no-data cell (NEXUS cycle-08 parity gap 4).
+        // Only reachable when the report explicitly selects Format: Text.
+        const formatType = this.valueFormatType();
+        const textMode = formatType === "text";
+        const textValue = textMode && card.rawValue != null && String(card.rawValue) !== ""
+            ? String(card.rawValue) : null;
+        const isEmpty = textMode ? textValue == null : reading == null;
+        const hasTarget = !textMode && card.target != null && card.target > 0;
         // Band law: no target reads neutral — the brand accent, not a verdict.
         // A MISSING value is not a missed target: band() was being handed NaN
         // and returning "danger", so a no-data cell kept a danger-coloured
@@ -457,8 +526,13 @@ export class Visual implements IVisual {
         const el = document.createElement("div");
         el.className = `kw-card kw-${accentStyle}`;
         el.style.background = hc ? this.hcBackground : surf.card;
-        const baseBorderColor = hc ? this.hcForeground : surf.border;
-        el.style.border = `${hc ? 2 : 1}px solid ${baseBorderColor}`;
+        // Per-card border (NEXUS cycle-08 parity gap 7). Off by default, so an
+        // untouched report keeps the theme token and the stylesheet's radius —
+        // the wall-level Border card is untouched and still paints the outside.
+        const cellBorder = this.cellBorderPaint;
+        const baseBorderColor = cellBorder ? cellBorder.colorCss : (hc ? this.hcForeground : surf.border);
+        el.style.border = `${cellBorder ? cellBorder.width : (hc ? 2 : 1)}px solid ${baseBorderColor}`;
+        if (cellBorder) el.style.borderRadius = `${cellBorder.radius}px`;
         this.cardEls[index] = el;
         this.cardBaseBorder[index] = baseBorderColor;
         this.cardIds[index] = card.selectionId;
@@ -467,23 +541,32 @@ export class Visual implements IVisual {
 
         // Accent (board .k2bar): flat = gradient bar, glassTube = rounded
         // gradient tube + CSS highlight, cornerBracket = border corners.
-        const bar = document.createElement("div");
-        bar.className = "kw-bar";
-        if (accentStyle === "cornerBracket") {
-            bar.style.borderColor = bandHex;
-            if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
-        } else {
-            bar.style.background =
-                `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
-            if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 40)}`;
-        }
-        el.appendChild(bar);
-        if (twoCorners) {
-            const c2 = document.createElement("div");
-            c2.className = "kw-corner2";
-            c2.style.borderColor = bandHex;
-            if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
-            el.appendChild(c2);
+        //
+        // This is the CELL accent. Turning off the wall's own Card Signature
+        // never turned it off and nothing else did either, so the two
+        // signatures could not be told apart in the pane (NEXUS cycle-08 parity
+        // gap 7). "Cell accent" is that control; it defaults ON.
+        const showAccent = kw.showAccent.value !== false;
+        let bar: HTMLDivElement | null = null;
+        if (showAccent) {
+            bar = document.createElement("div");
+            bar.className = "kw-bar";
+            if (accentStyle === "cornerBracket") {
+                bar.style.borderColor = bandHex;
+                if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
+            } else {
+                bar.style.background =
+                    `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
+                if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 40)}`;
+            }
+            el.appendChild(bar);
+            if (twoCorners) {
+                const c2 = document.createElement("div");
+                c2.className = "kw-corner2";
+                c2.style.borderColor = bandHex;
+                if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
+                el.appendChild(c2);
+            }
         }
 
         // Head: eyebrow label + beveled status dot. Built BEFORE the empty
@@ -496,11 +579,11 @@ export class Visual implements IVisual {
         const eye = document.createElement("span");
         eye.className = "kw-eye";
         eye.textContent = ls.uppercase.value ? card.label.toUpperCase() : card.label;
-        if (ls.fontFamily.value) eye.style.fontFamily = ls.fontFamily.value;
-        if (ls.fontSize.value) eye.style.fontSize = `${ls.fontSize.value}px`;
-        eye.style.fontWeight = ls.bold.value ? "700" : "600";
-        eye.style.fontStyle = ls.italic.value ? "italic" : "normal";
+        this.applyTypography(eye, ls, { on: "700", off: "600" });
         eye.style.color = hc ? this.hcForeground : (ls.color.value?.value || surf.muted);
+        const labelMargins = marginsFor(String(ls.labelAlign?.value ?? "left"));
+        eye.style.marginLeft = labelMargins.left;
+        eye.style.marginRight = labelMargins.right;
         head.appendChild(eye);
         if (kw.showDot.value) {
             const dot = document.createElement("span");
@@ -515,9 +598,11 @@ export class Visual implements IVisual {
         // Per-cell empty state (board .k2.nd) — value missing in the filter.
         if (isEmpty) {
             el.classList.add("kw-nd");
-            bar.style.background = hc ? this.hcForeground : surf.muted;
-            bar.style.opacity = "0.35";
-            bar.style.boxShadow = "none";
+            if (bar) {
+                bar.style.background = hc ? this.hcForeground : surf.muted;
+                bar.style.opacity = "0.35";
+                bar.style.boxShadow = "none";
+            }
             const ndv = document.createElement("div");
             ndv.className = "kw-ndv";
             ndv.style.color = hc ? this.hcForeground : surf.muted;
@@ -536,12 +621,18 @@ export class Visual implements IVisual {
         // every verdict below it (see `reading`).
         const val = document.createElement("div");
         val.className = "kw-val";
-        val.textContent = this.formatValue(reading, card.valueFormat);
-        if (vs.fontFamily.value) val.style.fontFamily = vs.fontFamily.value;
-        if (vs.fontSize.value) val.style.fontSize = `${vs.fontSize.value}px`;
-        val.style.fontWeight = vs.bold.value ? "700" : "500";
-        val.style.fontStyle = vs.italic.value ? "italic" : "normal";
+        // "Model format" (the default) is the wall's existing behaviour; an
+        // explicit Format overrides it, and Text renders the model's own value.
+        val.textContent = textMode
+            ? (textValue as string)
+            : formatType === "auto"
+                ? this.formatValue(reading as number, card.valueFormat)
+                : this.formatExplicit(reading as number, formatType);
+        this.applyTypography(val, vs, { on: "700", off: "500" });
         val.style.color = hc ? this.hcForeground : (vs.color.value?.value || surf.text);
+        // Alignment is textAlign only: align-self would shrink the block to its
+        // content and defeat the stylesheet's ellipsis on a narrow cell.
+        val.style.textAlign = textAlignFor(String(this.formattingSettings.valueFormat.valueAlign?.value ?? "left"));
         el.appendChild(val);
 
         // Foot: the comparison pill + target line + quantised strip.
@@ -586,12 +677,24 @@ export class Visual implements IVisual {
                 pill.style.background = hc ? "transparent" : toRgba(pillHex, 85);
                 if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
                 pill.textContent = pillText;
+                // Pill typography/alignment — it was FIXED, so a KPI Card
+                // composition could not be reproduced (NEXUS cycle-08 parity
+                // gap 6). Defaults are the stylesheet's own values.
+                this.applyTypography(pill, cs, { on: "700", off: "500" });
+                const pillMargins = marginsFor(String(cs.changeAlign?.value ?? "left"));
+                pill.style.marginLeft = pillMargins.left;
+                pill.style.marginRight = pillMargins.right;
                 foot.appendChild(pill);
             }
             if (subOn) {
                 const sub = document.createElement("span");
                 sub.className = "kw-sub";
-                sub.style.color = hc ? this.hcForeground : surf.muted;
+                sub.style.color = hc ? this.hcForeground
+                    : (ss.subtitleColor.value?.value || surf.muted);
+                this.applyTypography(sub, ss, { on: "700", off: "400" });
+                const subMargins = marginsFor(String(ss.subtitleAlign?.value ?? "left"));
+                sub.style.marginLeft = subMargins.left;
+                sub.style.marginRight = subMargins.right;
                 sub.textContent = `${delta >= 0 ? "vs" : "to"} target ${this.formatValue(card.target as number, card.targetFormat ?? card.valueFormat)}`;
                 foot.appendChild(sub);
             }
