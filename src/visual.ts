@@ -114,6 +114,7 @@ export class Visual implements IVisual {
 
     private lastUpdateOptions: VisualUpdateOptions | null = null;
     private disposed = false;
+    private cardEvents = new AbortController();
 
     /** Held so destroy() can unregister the SAME function objects. */
     private onRootClick: (e: MouseEvent) => void;
@@ -230,6 +231,8 @@ export class Visual implements IVisual {
             this.formattingSettings = this.formattingSettingsService
                 .populateFormattingSettingsModel(VisualFormattingSettingsModel, dv);
 
+            this.cardEvents.abort();
+            this.cardEvents = new AbortController();
             while (this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
             // The per-cell registers are rebuilt together with the cells — a
             // stale identity or border colour left over from the previous
@@ -771,6 +774,10 @@ export class Visual implements IVisual {
     }
 
     private wireCard(el: HTMLDivElement, index: number, card: CardData, ariaLabel: string, focusRing: string): void {
+        const signal = this.cardEvents.signal;
+        const selectionComplete = (ids: ISelectionId[]) => {
+            if (!signal.aborted) this.setSelectedKeys(ids);
+        };
         // ─── Keyboard path (NEXUS cycle-08 §9) ─────────────────────────
         // capabilities.json advertises supportsKeyboardFocus and the README
         // promises card navigation, but the wall had pointer handlers ONLY:
@@ -789,7 +796,7 @@ export class Visual implements IVisual {
                 e.preventDefault();
                 e.stopPropagation();
                 this.selectionManager.select(card.selectionId, e.ctrlKey || e.metaKey)
-                    .then((ids: ISelectionId[]) => this.setSelectedKeys(ids));
+                    .then(selectionComplete);
             } else if (key === "ContextMenu" || (e.shiftKey && key === "F10")) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -799,7 +806,7 @@ export class Visual implements IVisual {
                     y: rect.top + rect.height / 2,
                 });
             }
-        });
+        }, { signal });
         // Keyboard focus must show the tooltip's information too — a focus move
         // is the keyboard equivalent of the hover below.
         el.addEventListener("focus", () => {
@@ -810,10 +817,10 @@ export class Visual implements IVisual {
                 dataItems: card.tooltipItems,
                 identities: [card.selectionId],
             });
-        });
+        }, { signal });
         el.addEventListener("blur", () => {
             this.tooltipService.hide({ isTouchEvent: false, immediately: false });
-        });
+        }, { signal });
 
         el.addEventListener("mousemove", (e: MouseEvent) => {
             this.tooltipService.show({
@@ -822,20 +829,18 @@ export class Visual implements IVisual {
                 dataItems: card.tooltipItems,
                 identities: [card.selectionId],
             });
-        });
+        }, { signal });
         el.addEventListener("mouseleave", () => {
             this.tooltipService.hide({ isTouchEvent: false, immediately: false });
-        });
+        }, { signal });
         el.addEventListener("click", (e: MouseEvent) => {
             const multi = e.ctrlKey || e.metaKey;
             // The selection manager's answer is authoritative — the old
             // index bookkeeping re-derived it and drifted as soon as the rows
             // were sorted (NEXUS cycle-08 §2).
-            this.selectionManager.select(card.selectionId, multi).then((ids: ISelectionId[]) => {
-                this.setSelectedKeys(ids);
-            });
+            this.selectionManager.select(card.selectionId, multi).then(selectionComplete);
             e.stopPropagation();
-        });
+        }, { signal });
     }
 
     /** A stable, sort-independent key for a selection identity. */
@@ -850,12 +855,14 @@ export class Visual implements IVisual {
     }
 
     private setSelectedKeys(ids: ISelectionId[] | null | undefined): void {
+        if (this.disposed) return;
         this.selectedKeys = new Set((ids || []).map(id => this.keyOf(id)).filter(k => k !== ""));
         this.applySelectionRing();
     }
 
     /** Rebuild local selection from whatever the host currently holds. */
     private syncSelectionFromHost(): void {
+        if (this.disposed) return;
         let ids: ISelectionId[] = [];
         try {
             ids = (this.selectionManager.getSelectionIds() as ISelectionId[]) || [];
@@ -963,6 +970,7 @@ export class Visual implements IVisual {
         // update() against a torn-down target otherwise (NEXUS lifecycle finding).
         this.licenseGate.dispose();
         this.disposed = true;
+        this.cardEvents.abort();
 
         // Unregister the listeners this visual OWNS, using the same function
         // objects it registered — an inline arrow is unremovable, which is why
