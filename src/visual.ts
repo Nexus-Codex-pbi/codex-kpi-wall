@@ -28,7 +28,7 @@ import DataView = powerbi.DataView;
 
 import { VisualFormattingSettingsModel, textAlignFor, marginsFor } from "./settings";
 
-import { toRgba } from "./shared/colorHelpers";
+import { toRgba, compositeOver, surfaceTone, contrastInk } from "./shared/colorHelpers";
 import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
@@ -46,6 +46,11 @@ function themeFor(hex: string): Theme {
 }
 
 const STRIP_SEGMENTS = 10;   // board: 10-segment quantised target strip
+
+// Must match the DECLARED default of titleSettings.titleColor in settings.ts.
+// A drift between the two would make the title adapt when the user HAD set a
+// colour, or refuse to adapt when they had not.
+const TITLE_DEFAULT_INK = "#1a1a2e";
 
 interface CardData {
     label: string;
@@ -121,6 +126,11 @@ export class Visual implements IVisual {
      *  both"). Null when the card is off — the theme-token cell border and the
      *  stylesheet's 10px radius then stand, exactly as today. */
     private cellBorderPaint: ResolvedBorder | null = null;
+    /** The colour a viewer actually SEES behind the wall's own chrome: the
+     *  Background card's fill composited over whatever the host reports behind
+     *  it. WALL-level text is judged against this. Cell surfaces are opaque
+     *  theme tokens and keep their own decision (NEXUS cycle-08 §7). */
+    private wallSurfaceHex = "#ffffff";
 
 
     constructor(options: VisualConstructorOptions) {
@@ -233,6 +243,22 @@ export class Visual implements IVisual {
             const bgHex = background.backgroundColor.value?.value ?? "#ffffff";
             const bgTransparencyPct = background.transparency.value ?? 100;
             const theme: Theme = themeFor(bgHex);
+            // The wall's own backing, as SEEN. The title's ink was picked from
+            // the stored fill, so white at 100% transparency over a dark page
+            // still chose dark ink and 95%-transparent black over white chose
+            // light ink — in both cases judged against a colour nobody sees
+            // (NEXUS cycle-08 §7). An invisible fill is not evidence of the
+            // backdrop: composite it over what the host says is behind, then
+            // judge the result. `theme` above is UNCHANGED and still governs
+            // the cells, which are opaque theme-token surfaces.
+            // LIMIT: colorPalette.background is the only backdrop the host
+            // exposes — a page image or a shape under the visual is not
+            // readable from here, and an explicit ink override remains the
+            // answer for those reports.
+            const behindHex = colorPalette?.background?.value || "#ffffff";
+            this.wallSurfaceHex = this.isHighContrast
+                ? this.hcBackground
+                : compositeOver(bgHex, bgTransparencyPct, behindHex);
             this.target.style.background = this.isHighContrast
                 ? this.hcBackground : toRgba(bgHex, bgTransparencyPct);
             applyBorder(this.target, this.formattingSettings.visualBorder, {
@@ -867,9 +893,15 @@ export class Visual implements IVisual {
         el.style.fontStyle = t.titleItalic?.value ? "italic" : "normal";
         el.style.textDecoration = t.titleUnderline?.value ? "underline" : "none";
         el.style.textAlign = textAlignFor(t.titleAlign?.value as string);
-        // Untouched default ink flips to the dark-theme token (suite sentinel).
+        // Only the UNTOUCHED swatch adapts — a title colour the user actually
+        // set is a deliberate choice and is handed through unchanged. The
+        // surface judged is the COMPOSITED one, not the stored fill, and the
+        // ink is the higher-contrast of the two candidates rather than a
+        // luminance bucket (NEXUS cycle-08 §7).
         const set = t.titleColor?.value?.value;
-        const c = set === "#1a1a2e" && theme === "dark" ? surfaceTokens("dark").text : set;
+        const c = String(set ?? "").toLowerCase() === TITLE_DEFAULT_INK
+            ? contrastInk(this.wallSurfaceHex, TITLE_DEFAULT_INK, surfaceTokens("dark").text)
+            : set;
         if (c) el.style.color = this.isHighContrast ? this.hcForeground : c;
         this.rootDiv.appendChild(el);
     }
@@ -877,7 +909,10 @@ export class Visual implements IVisual {
     // Landing state — fills the body so right-click reaches our DOM
     // regardless of which region the cert reviewer hits.
     private renderEmpty(theme: Theme): void {
-        const surf = surfaceTokens(theme);
+        // The landing prompt is wall-level text on the wall's own backing, so
+        // it takes the same composited decision the title does (§7). There are
+        // no cells here, so no cell-surface decision is affected.
+        const surf = surfaceTokens(this.isHighContrast ? theme : surfaceTone(this.wallSurfaceHex));
         const wrap = document.createElement("div");
         wrap.className = "codex-visual-empty";
         const h = document.createElement("div");
