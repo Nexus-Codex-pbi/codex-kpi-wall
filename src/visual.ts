@@ -366,6 +366,9 @@ export class Visual implements IVisual {
             : hasTarget ? bandColor(band(reading as number, card.target as number), theme)
             : accentToken(theme);
         const glow = !hc && theme === "dark" && !isEmpty;
+        // Keyboard focus ring colour — a painted surface, so it takes the
+        // system foreground slot under high contrast (NEXUS cycle-08 §9).
+        const focusRing = hc ? this.hcForeground : accentToken(theme);
 
         const el = document.createElement("div");
         el.className = `kw-card kw-${accentStyle}`;
@@ -441,7 +444,7 @@ export class Visual implements IVisual {
             ndt.textContent = "No data in current filter";
             el.appendChild(ndv);
             el.appendChild(ndt);
-            this.wireCard(el, index, card);
+            this.wireCard(el, index, card, `${card.label}: no data in current filter`, focusRing);
             return el;
         }
 
@@ -501,11 +504,61 @@ export class Visual implements IVisual {
         }
         el.appendChild(footWrap);
 
-        this.wireCard(el, index, card);
+        // A named focus target: the screen-reader name carries the same three
+        // facts the cell shows — category, reading, and the target it is
+        // judged against.
+        const ariaLabel = hasTarget
+            ? `${card.label}: ${val.textContent}, target ${this.formatValue(card.target as number, card.valueFormat)}`
+            : `${card.label}: ${val.textContent}`;
+        this.wireCard(el, index, card, ariaLabel, focusRing);
         return el;
     }
 
-    private wireCard(el: HTMLDivElement, index: number, card: CardData): void {
+    private wireCard(el: HTMLDivElement, index: number, card: CardData, ariaLabel: string, focusRing: string): void {
+        // ─── Keyboard path (NEXUS cycle-08 §9) ─────────────────────────
+        // capabilities.json advertises supportsKeyboardFocus and the README
+        // promises card navigation, but the wall had pointer handlers ONLY:
+        // Tab skipped from the button before the wall to the one after it with
+        // zero card focus targets, and Enter selected nothing. Each cell is now
+        // a named focus target with a visible focus ring and Enter/Space/menu
+        // parity with the pointer. The focus colour is resolved by the caller,
+        // so it takes the system foreground under high contrast.
+        el.tabIndex = 0;
+        el.setAttribute("role", "button");
+        el.setAttribute("aria-label", ariaLabel);
+        el.style.outlineColor = focusRing;
+        el.addEventListener("keydown", (e: KeyboardEvent) => {
+            const key = e.key;
+            if (key === "Enter" || key === " " || key === "Spacebar") {
+                e.preventDefault();
+                e.stopPropagation();
+                this.selectionManager.select(card.selectionId, e.ctrlKey || e.metaKey)
+                    .then((ids: ISelectionId[]) => this.setSelectedKeys(ids));
+            } else if (key === "ContextMenu" || (e.shiftKey && key === "F10")) {
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = el.getBoundingClientRect();
+                this.selectionManager.showContextMenu(card.selectionId, {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                });
+            }
+        });
+        // Keyboard focus must show the tooltip's information too — a focus move
+        // is the keyboard equivalent of the hover below.
+        el.addEventListener("focus", () => {
+            const rect = el.getBoundingClientRect();
+            this.tooltipService.show({
+                coordinates: [rect.left + rect.width / 2, rect.top + rect.height / 2],
+                isTouchEvent: false,
+                dataItems: card.tooltipItems,
+                identities: [card.selectionId],
+            });
+        });
+        el.addEventListener("blur", () => {
+            this.tooltipService.hide({ isTouchEvent: false, immediately: false });
+        });
+
         el.addEventListener("mousemove", (e: MouseEvent) => {
             this.tooltipService.show({
                 coordinates: [e.clientX, e.clientY],
@@ -578,6 +631,9 @@ export class Visual implements IVisual {
             // accent border for the rest of the session (NEXUS cycle-08 §3).
             // Shadow and opacity already reset; the border now does too.
             el.style.borderColor = sel ? acc : (this.cardBaseBorder[i] ?? "");
+            // The ring is a colour-only cue; a keyboard/AT user needs the state
+            // in the accessibility tree too (NEXUS cycle-08 §9).
+            el.setAttribute("aria-pressed", sel ? "true" : "false");
             if (!this.highlightActive) el.style.opacity = any && !sel ? "0.55" : "1";
         });
     }

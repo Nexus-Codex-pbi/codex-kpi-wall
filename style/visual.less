@@ -56,6 +56,23 @@
     cursor: pointer;
 }
 
+/* Visible keyboard focus (NEXUS cycle-08 §9). outline-color is set inline per
+ * cell so it routes through the high-contrast system foreground; only the
+ * geometry lives here. :focus-visible keeps the ring off pointer clicks. */
+.kw-card:focus-visible {
+    outline-style: solid;
+    outline-width: 2px;
+    outline-offset: 2px;
+}
+/* Fallback for engines without :focus-visible — never leave a keyboard user
+ * with no focus indication at all. */
+.kw-card:focus {
+    outline-style: solid;
+    outline-width: 2px;
+    outline-offset: 2px;
+}
+.kw-card:focus:not(:focus-visible) { outline-style: none; }
+
 /* Accent — flat bar (board .k2bar) */
 .kw-bar {
     position: absolute;
