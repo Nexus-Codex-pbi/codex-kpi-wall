@@ -90,6 +90,7 @@ export class Visual implements IVisual {
     private licenseGate: LicenseGate;
 
     private lastUpdateOptions: VisualUpdateOptions | null = null;
+    private disposed = false;
 
     /** Held so destroy() can unregister the SAME function objects. */
     private onRootClick: (e: MouseEvent) => void;
@@ -167,6 +168,13 @@ export class Visual implements IVisual {
     }
 
     public update(options: VisualUpdateOptions): void {
+        // A torn-down visual renders nothing and reports nothing. Cancelling the
+        // licence promise stops the known replay, but any other late caller
+        // (a queued host update, a resize) would otherwise reach the style write
+        // that sits ABOVE the try/catch and throw a live renderingFailed
+        // (NEXUS cycle-08 §10). Guarded before renderingStarted so a disposed
+        // instance cannot open a render it will never finish.
+        if (this.disposed || !this.target || !this.rootDiv) return;
         this.events.renderingStarted(options);
         this.lastUpdateOptions = options;
 
@@ -693,7 +701,42 @@ export class Visual implements IVisual {
         // Drop the in-flight licence check FIRST: its redraw callback replays
         // update() against a torn-down target otherwise (NEXUS lifecycle finding).
         this.licenseGate.dispose();
+        this.disposed = true;
+
+        // Unregister the listeners this visual OWNS, using the same function
+        // objects it registered — an inline arrow is unremovable, which is why
+        // a destroyed wall still answered a right-click on the root and a
+        // background click still reached the selection manager. Guarded because
+        // destroy() must not throw whatever state the host is in.
+        try {
+            this.target?.removeEventListener("contextmenu", this.onContextMenu);
+            this.rootDiv?.removeEventListener("click", this.onRootClick);
+        } catch { /* nothing left to unregister */ }
+
+        // Drop the caches those callbacks read, so nothing can replay a render
+        // or attribute a stale identity, and retract any tooltip open at the
+        // moment of teardown.
+        this.lastUpdateOptions = null;
+        this.cardEls = [];
+        this.cardIds = [];
+        this.cardKeys = [];
+        this.cardBaseBorder = [];
+        this.selectedKeys.clear();
+        this.selectedIdx.clear();
+        try {
+            this.tooltipService?.hide({ isTouchEvent: false, immediately: true });
+        } catch { /* host service already gone */ }
+
+        // destroy() removed the cells but left the two outer signature elements
+        // attached to the host element (NEXUS cycle-08 §10, receipt
+        // `afterDestroy.signatures: 2`). The signature handle owns them.
+        try {
+            this.cornerSignature?.destroy();
+        } catch { /* already detached */ }
+        this.cornerSignature = null;
+
         while (this.rootDiv && this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
+        this.rootDiv?.remove();
         this.rootDiv = null;
         this.target = null;
     }
