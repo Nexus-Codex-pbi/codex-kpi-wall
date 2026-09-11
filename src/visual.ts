@@ -73,6 +73,7 @@ interface CardData {
      *  can be below target AND improving, and Wall could express neither
      *  separately (NEXUS cycle-08 parity gap 1). */
     changeValue: number | null;
+    changeBound: boolean;
     changeHighlight: number | null;
     changeLabel: string | null;
     changeFormat: string | null;
@@ -337,7 +338,8 @@ export class Visual implements IVisual {
             // reading, everywhere.
             const changeHighlight = num(changeCol?.highlights?.[i]);
             const rawChangeLabel = changeLabelCol?.values?.[i];
-            const changeLabel = rawChangeLabel == null ? null : String(rawChangeLabel);
+            const changeLabel = rawChangeLabel == null || String(rawChangeLabel).trim() === ""
+                ? null : String(rawChangeLabel);
             const changeFormat = changeCol?.source.format ?? null;
 
             const selectionId = this.host.createSelectionIdBuilder()
@@ -371,7 +373,9 @@ export class Visual implements IVisual {
             if (changeReading != null) {
                 tooltipItems.push({
                     displayName: changeCol!.source.displayName,
-                    value: changeLabel ?? this.formatChange(changeReading, changeFormat),
+                    value: changeLabel ?? (changeFormat
+                        ? this.formatValue(changeReading, changeFormat)
+                        : `${(changeReading * 100).toFixed(1)}%`),
                 });
             }
             for (const tc of tooltipCols) {
@@ -382,7 +386,7 @@ export class Visual implements IVisual {
             out.push({
                 label, value, target, highlight, sortOrder, valueFormat: fmt, targetFormat,
                 rawValue,
-                changeValue, changeHighlight, changeLabel, changeFormat,
+                changeValue, changeBound: !!changeCol, changeHighlight, changeLabel, changeFormat,
                 selectionId, tooltipItems,
             });
         }
@@ -678,7 +682,7 @@ export class Visual implements IVisual {
         // bound this is the original target ratio, unchanged.
         const changeReading = this.changeOf(card);
         const hasChange = changeReading != null;
-        const pillOn = kw.showPill.value && (hasChange || hasTarget);
+        const pillOn = kw.showPill.value && (card.changeBound ? hasChange : hasTarget);
         const subOn = kw.showSub.value && hasTarget;
         const footWrap = document.createElement("div");
         if (pillOn || subOn) {
