@@ -318,6 +318,7 @@ export class Visual implements IVisual {
         if (!valueCol) return [];
 
         const num = (raw: powerbi.PrimitiveValue | undefined): number | null => {
+            if (typeof raw === "string" && raw.trim() === "") return null;
             const n = typeof raw === "number" ? raw : (raw == null ? NaN : Number(raw));
             return isFinite(n) ? n : null;
         };
@@ -356,7 +357,12 @@ export class Visual implements IVisual {
             // under its own explicit name.
             const highlighting = this.highlightActive && highlight != null;
             const reading = highlighting ? highlight : value;
-            if (reading != null) tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(reading, fmt) });
+            const rawValue = valueCol.values?.[i] ?? null;
+            if (this.valueFormatType() === "text" && typeof rawValue === "string" && !highlighting) {
+                tooltipItems.push({ displayName: valueCol.source.displayName, value: rawValue });
+            } else if (reading != null) {
+                tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(reading, fmt) });
+            }
             if (highlighting && value != null && value !== highlight) {
                 tooltipItems.push({ displayName: `${valueCol.source.displayName} (unfiltered)`, value: this.formatValue(value, fmt) });
             }
@@ -375,7 +381,7 @@ export class Visual implements IVisual {
 
             out.push({
                 label, value, target, highlight, sortOrder, valueFormat: fmt, targetFormat,
-                rawValue: valueCol.values?.[i] ?? null,
+                rawValue,
                 changeValue, changeHighlight, changeLabel, changeFormat,
                 selectionId, tooltipItems,
             });
