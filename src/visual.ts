@@ -80,6 +80,9 @@ export class Visual implements IVisual {
     private selectedKeys = new Set<string>();
     /** The selection key of each rendered cell, in render order. */
     private cardKeys: string[] = [];
+    /** Each rendered cell's OWN border colour, so deselecting can put it back
+     *  instead of leaving the selection accent behind (NEXUS cycle-08 §3). */
+    private cardBaseBorder: string[] = [];
     /** DERIVED from selectedKeys against the current render order — never the
      *  store. Kept as a field because it is the thing the ring is drawn from. */
     private selectedIdx = new Set<number>();
@@ -340,8 +343,10 @@ export class Visual implements IVisual {
         const el = document.createElement("div");
         el.className = `kw-card kw-${accentStyle}`;
         el.style.background = hc ? this.hcBackground : surf.card;
-        el.style.border = `${hc ? 2 : 1}px solid ${hc ? this.hcForeground : surf.border}`;
+        const baseBorderColor = hc ? this.hcForeground : surf.border;
+        el.style.border = `${hc ? 2 : 1}px solid ${baseBorderColor}`;
         this.cardEls[index] = el;
+        this.cardBaseBorder[index] = baseBorderColor;
 
         if (this.highlightActive && card.highlight == null) el.style.opacity = "0.35";
 
@@ -536,7 +541,11 @@ export class Visual implements IVisual {
             el.style.boxShadow = sel
                 ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, 70)}` : ""}`
                 : "";
-            if (sel) el.style.borderColor = acc;
+            // The selected branch used to set borderColor and the unselected
+            // branch never put it back, so a deselected card kept the cyan
+            // accent border for the rest of the session (NEXUS cycle-08 §3).
+            // Shadow and opacity already reset; the border now does too.
+            el.style.borderColor = sel ? acc : (this.cardBaseBorder[i] ?? "");
             if (!this.highlightActive) el.style.opacity = any && !sel ? "0.55" : "1";
         });
     }
