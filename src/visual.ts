@@ -231,6 +231,8 @@ export class Visual implements IVisual {
             this.formattingSettings = this.formattingSettingsService
                 .populateFormattingSettingsModel(VisualFormattingSettingsModel, dv);
 
+            const focusedIndex = this.cardEls.indexOf(this.target.ownerDocument.activeElement as HTMLDivElement);
+            const focusedKey = focusedIndex >= 0 ? this.cardKeys[focusedIndex] : null;
             this.cardEvents.abort();
             this.cardEvents = new AbortController();
             while (this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
@@ -298,6 +300,10 @@ export class Visual implements IVisual {
 
             this.renderGrid(cards, theme);
             this.syncSelectionFromHost();
+            if (focusedKey != null) {
+                const focusedCard = this.cardKeys.indexOf(focusedKey);
+                if (focusedCard >= 0) this.cardEls[focusedCard].focus({ preventScroll: true });
+            }
 
             this.events.renderingFinished(options);
         } catch (e) {
