@@ -293,7 +293,7 @@ export class Visual implements IVisual {
             }
 
             this.renderGrid(cards, theme);
-            this.applySelectionRing();
+            this.syncSelectionFromHost();
 
             this.events.renderingFinished(options);
         } catch (e) {
