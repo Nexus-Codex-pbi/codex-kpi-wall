@@ -237,7 +237,18 @@ export class Visual implements IVisual {
             const tooltipItems: VisualTooltipDataItem[] = [
                 { displayName: labels.source.displayName || "Card", value: label },
             ];
-            if (value != null) tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(value, fmt) });
+            // Under a cross-highlight the cell is rendered from the HIGHLIGHTED
+            // reading (see readingOf), so the tooltip must report that same
+            // population — it used to report the unfiltered total beside a
+            // highlighted headline, labelling two different populations as the
+            // same reading (NEXUS cycle-08 §1). The total is still available,
+            // under its own explicit name.
+            const highlighting = this.highlightActive && highlight != null;
+            const reading = highlighting ? highlight : value;
+            if (reading != null) tooltipItems.push({ displayName: valueCol.source.displayName, value: this.formatValue(reading, fmt) });
+            if (highlighting && value != null && value !== highlight) {
+                tooltipItems.push({ displayName: `${valueCol.source.displayName} (unfiltered)`, value: this.formatValue(value, fmt) });
+            }
             if (target != null) tooltipItems.push({ displayName: targetCol!.source.displayName, value: this.formatValue(target, targetCol!.source.format ?? fmt) });
             for (const tc of tooltipCols) {
                 const tv = tc.values?.[i];
@@ -251,6 +262,13 @@ export class Visual implements IVisual {
             out.sort((a, b) => (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER));
         }
         return out;
+    }
+
+    /** The ONE number a cell is rendered from. Under an active cross-highlight
+     *  that is the highlighted reading; a card the highlight does not
+     *  contribute to keeps its own value and dims (NEXUS cycle-08 §1). */
+    private readingOf(card: CardData): number | null {
+        return (this.highlightActive && card.highlight != null) ? card.highlight : card.value;
     }
 
     // ─── Render ────────────────────────────────────────────────
@@ -289,10 +307,17 @@ export class Visual implements IVisual {
         const twoCorners = accentStyle === "cornerBracket" && String(kw.corners.value?.value || "two") === "two";
         const glow = !hc && theme === "dark";
 
+        // ONE reading drives the WHOLE cell. The headline used to come from the
+        // highlight while the band colour, delta pill, target strip and tooltip
+        // all came from the unfiltered value: a 120/100 card highlighted at 40
+        // rendered "40" beside a green "▲ 20.0%" with ten lit segments
+        // (NEXUS cycle-08 §1). Recompute everything from the highlighted
+        // reading; a card with no highlight keeps its own value and dims.
+        const reading = this.readingOf(card);
         const hasTarget = card.target != null && card.target > 0;
         // Band law: no target reads neutral — the brand accent, not a verdict.
         const bandHex = hc ? this.hcForeground
-            : hasTarget ? bandColor(band(card.value ?? NaN, card.target as number), theme)
+            : hasTarget ? bandColor(band(reading ?? NaN, card.target as number), theme)
             : accentToken(theme);
 
         const el = document.createElement("div");
@@ -325,7 +350,7 @@ export class Visual implements IVisual {
         }
 
         // Per-cell empty state (board .k2.nd) — value missing in the filter.
-        if (card.value == null) {
+        if (reading == null) {
             el.classList.add("kw-nd");
             bar.style.background = hc ? this.hcForeground : surf.muted;
             bar.style.opacity = "0.35";
@@ -366,11 +391,11 @@ export class Visual implements IVisual {
         }
         el.appendChild(head);
 
-        // Value — cross-highlight shows the highlighted number.
-        const shown = (this.highlightActive && card.highlight != null) ? card.highlight : card.value;
+        // Value — cross-highlight shows the highlighted number, and so does
+        // every verdict below it (see `reading`).
         const val = document.createElement("div");
         val.className = "kw-val";
-        val.textContent = this.formatValue(shown, card.valueFormat);
+        val.textContent = this.formatValue(reading, card.valueFormat);
         if (vs.fontFamily.value) val.style.fontFamily = vs.fontFamily.value;
         if (vs.fontSize.value) val.style.fontSize = `${vs.fontSize.value}px`;
         val.style.fontWeight = vs.bold.value ? "700" : "500";
@@ -384,7 +409,7 @@ export class Visual implements IVisual {
         if (hasTarget && (kw.showPill.value || kw.showSub.value)) {
             const foot = document.createElement("div");
             foot.className = "kw-foot";
-            const delta = (card.value as number) / (card.target as number) - 1;
+            const delta = (reading as number) / (card.target as number) - 1;
             if (kw.showPill.value) {
                 const pill = document.createElement("span");
                 pill.className = "kw-pill";
@@ -406,7 +431,7 @@ export class Visual implements IVisual {
         if (hasTarget && kw.showStrip.value) {
             const strip = document.createElement("div");
             strip.className = "kw-strip";
-            const lit = Math.round(Math.max(0, Math.min((card.value as number) / (card.target as number), 1)) * STRIP_SEGMENTS);
+            const lit = Math.round(Math.max(0, Math.min((reading as number) / (card.target as number), 1)) * STRIP_SEGMENTS);
             for (let s = 0; s < STRIP_SEGMENTS; s++) {
                 const seg = document.createElement("span");
                 if (s < lit) {
