@@ -569,6 +569,7 @@ export class Visual implements IVisual {
 
         const el = document.createElement("div");
         el.className = `kw-card kw-${accentStyle}`;
+        el.classList.toggle("kw-hc", hc);
         el.style.background = hc ? this.hcBackground : surf.card;
         // Per-card border (NEXUS cycle-08 parity gap 7). Off by default, so an
         // untouched report keeps the theme token and the stylesheet's radius —
@@ -599,7 +600,7 @@ export class Visual implements IVisual {
                 bar.style.borderColor = bandHex;
                 if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
             } else {
-                bar.style.background =
+                bar.style.background = hc ? this.hcForeground :
                     `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
                 if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 40)}`;
             }
@@ -644,12 +645,13 @@ export class Visual implements IVisual {
             el.classList.add("kw-nd");
             if (bar) {
                 bar.style.background = hc ? this.hcForeground : surf.muted;
-                bar.style.opacity = "0.35";
+                bar.style.opacity = hc ? "1" : "0.35";
                 bar.style.boxShadow = "none";
             }
             const ndv = document.createElement("div");
             ndv.className = "kw-ndv";
             ndv.style.color = hc ? this.hcForeground : surf.muted;
+            if (hc) ndv.style.opacity = "1";
             ndv.textContent = "— —";
             const ndt = document.createElement("div");
             ndt.className = "kw-ndt";
