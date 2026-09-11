@@ -73,11 +73,23 @@ export class Visual implements IVisual {
     private cornerSignature: CardSignatureHandle | null = null;
     private highlightActive = false;
     private cardEls: HTMLDivElement[] = [];
+    /** Selection state is held by IDENTITY. Grid indices are re-keyed by every
+     *  sort, so a Set of indices made the ring follow a POSITION: select Alpha,
+     *  reorder to Bravo/Charlie/Alpha, and Bravo lit up while the host's
+     *  selection was still Alpha (NEXUS cycle-08 §2). */
+    private selectedKeys = new Set<string>();
+    /** The selection key of each rendered cell, in render order. */
+    private cardKeys: string[] = [];
+    /** DERIVED from selectedKeys against the current render order — never the
+     *  store. Kept as a field because it is the thing the ring is drawn from. */
     private selectedIdx = new Set<number>();
 
     private licenseGate: LicenseGate;
 
     private lastUpdateOptions: VisualUpdateOptions | null = null;
+
+    /** Held so destroy() can unregister the SAME function object. */
+    private onRootClick: (e: MouseEvent) => void;
 
 
     constructor(options: VisualConstructorOptions) {
@@ -119,18 +131,22 @@ export class Visual implements IVisual {
             { variant: "cornerBracket", mirror: true }
         );
 
+        // The host reporting a selection change (bookmark, another visual, a
+        // page filter) used to CLEAR the local set, so an externally-selected
+        // card ended up with no ring at all. Rebuild from the identities the
+        // host is actually holding (NEXUS cycle-08 §2).
         this.selectionManager.registerOnSelectCallback(() => {
-            this.selectedIdx.clear();
-            this.applySelectionRing();
+            this.syncSelectionFromHost();
         });
 
-        this.rootDiv.addEventListener("click", () => {
-            if (this.selectedIdx.size) {
+        this.onRootClick = () => {
+            if (this.selectedKeys.size) {
                 this.selectionManager.clear();
-                this.selectedIdx.clear();
+                this.selectedKeys.clear();
                 this.applySelectionRing();
             }
-        });
+        };
+        this.rootDiv.addEventListener("click", this.onRootClick);
     }
 
     public update(options: VisualUpdateOptions): void {
@@ -293,6 +309,7 @@ export class Visual implements IVisual {
             ? `repeat(auto-fit, minmax(${minWidth}px, 1fr))`
             : `repeat(${colsMode}, minmax(${minWidth}px, 1fr))`;
 
+        this.cardKeys = cards.map(c => this.keyOf(c.selectionId));
         cards.forEach((card, i) => grid.appendChild(this.renderCard(card, i, theme)));
         this.rootDiv.appendChild(grid);
     }
@@ -465,21 +482,53 @@ export class Visual implements IVisual {
         });
         el.addEventListener("click", (e: MouseEvent) => {
             const multi = e.ctrlKey || e.metaKey;
+            // The selection manager's answer is authoritative — the old
+            // index bookkeeping re-derived it and drifted as soon as the rows
+            // were sorted (NEXUS cycle-08 §2).
             this.selectionManager.select(card.selectionId, multi).then((ids: ISelectionId[]) => {
-                if (!multi) this.selectedIdx.clear();
-                if (ids.length === 0) this.selectedIdx.clear();
-                else if (this.selectedIdx.has(index) && multi) this.selectedIdx.delete(index);
-                else this.selectedIdx.add(index);
-                this.applySelectionRing();
+                this.setSelectedKeys(ids);
             });
             e.stopPropagation();
         });
+    }
+
+    /** A stable, sort-independent key for a selection identity. */
+    private keyOf(id: ISelectionId | null | undefined): string {
+        if (!id) return "";
+        try {
+            if (typeof id.getKey === "function") return String(id.getKey());
+            return JSON.stringify(id.getSelector());
+        } catch {
+            return "";
+        }
+    }
+
+    private setSelectedKeys(ids: ISelectionId[] | null | undefined): void {
+        this.selectedKeys = new Set((ids || []).map(id => this.keyOf(id)).filter(k => k !== ""));
+        this.applySelectionRing();
+    }
+
+    /** Rebuild local selection from whatever the host currently holds. */
+    private syncSelectionFromHost(): void {
+        let ids: ISelectionId[] = [];
+        try {
+            ids = (this.selectionManager.getSelectionIds() as ISelectionId[]) || [];
+        } catch {
+            ids = [];
+        }
+        this.setSelectedKeys(ids);
     }
 
     /** Board .k2.sel — accent ring on selected cards, others untouched. */
     private applySelectionRing(): void {
         const theme = themeFor(this.formattingSettings?.background?.backgroundColor?.value?.value ?? "#ffffff");
         const acc = this.isHighContrast ? this.hcForeground : accentToken(theme);
+        // Re-derive positions from identities EVERY time the ring is drawn —
+        // this is what survives a sort (NEXUS cycle-08 §2).
+        this.selectedIdx = new Set<number>();
+        this.cardKeys.forEach((key, i) => {
+            if (key !== "" && this.selectedKeys.has(key)) this.selectedIdx.add(i);
+        });
         const any = this.selectedIdx.size > 0;
         this.cardEls.forEach((el, i) => {
             if (!el) return;
