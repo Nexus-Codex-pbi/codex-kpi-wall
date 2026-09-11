@@ -29,6 +29,23 @@
             "name": "tooltips",
             "kind": "Measure",
             "description": "Extra measures for the hover tooltip"
+        },
+        {
+            "displayName": "Change Value",
+            "name": "changeValue",
+            "kind": "Measure",
+            "description": "Optional. An independent comparison, e.g. -0.18 for an 18% fall against the prior period. When bound it drives the pill, leaving Target to drive the band colour and target strip.",
+            "requiredTypes": [
+                {
+                    "numeric": true
+                }
+            ]
+        },
+        {
+            "displayName": "Change Label",
+            "name": "changeLabel",
+            "kind": "Measure",
+            "description": "Optional. Text inside the pill. If blank, Change Value is formatted from its own model format."
         }
     ],
     "dataViewMappings": [
@@ -45,6 +62,12 @@
                         "max": 1
                     },
                     "sortOrder": {
+                        "max": 1
+                    },
+                    "changeValue": {
+                        "max": 1
+                    },
+                    "changeLabel": {
                         "max": 1
                     }
                 }
@@ -75,6 +98,16 @@
                         {
                             "bind": {
                                 "to": "sortOrder"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "changeValue"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "changeLabel"
                             }
                         },
                         {
@@ -333,6 +366,13 @@
                     "type": {
                         "bool": true
                     }
+                },
+                "showAccent": {
+                    "displayName": "Cell accent",
+                    "description": "The accent on each CARD. The wall's own outer signature is the separate Card Signature card.",
+                    "type": {
+                        "bool": true
+                    }
                 }
             }
         },
@@ -426,6 +466,12 @@
                             }
                         }
                     }
+                },
+                "underline": {
+                    "displayName": "Underline",
+                    "type": {
+                        "bool": true
+                    }
                 }
             }
         },
@@ -472,6 +518,236 @@
                     "displayName": "Uppercase",
                     "type": {
                         "bool": true
+                    }
+                },
+                "underline": {
+                    "displayName": "Underline",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "labelAlign": {
+                    "displayName": "Alignment",
+                    "type": {
+                        "formatting": {
+                            "alignment": true
+                        }
+                    }
+                }
+            }
+        },
+        "valueFormat": {
+            "displayName": "Value Format",
+            "properties": {
+                "valueFormatType": {
+                    "displayName": "Format",
+                    "description": "Model format uses the measure's own format string — the wall's existing behaviour.",
+                    "type": {
+                        "enumeration": [
+                            {
+                                "value": "auto",
+                                "displayName": "Model format"
+                            },
+                            {
+                                "value": "number",
+                                "displayName": "Number"
+                            },
+                            {
+                                "value": "percent",
+                                "displayName": "Percent"
+                            },
+                            {
+                                "value": "currency",
+                                "displayName": "Currency"
+                            },
+                            {
+                                "value": "text",
+                                "displayName": "Text"
+                            }
+                        ]
+                    }
+                },
+                "currencySymbol": {
+                    "displayName": "Currency Symbol",
+                    "type": {
+                        "text": true
+                    }
+                },
+                "decimalPlaces": {
+                    "displayName": "Decimal Places",
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "valueAlign": {
+                    "displayName": "Alignment",
+                    "type": {
+                        "formatting": {
+                            "alignment": true
+                        }
+                    }
+                }
+            }
+        },
+        "changeSettings": {
+            "displayName": "Change Indicator",
+            "properties": {
+                "changeDirection": {
+                    "displayName": "Direction Logic",
+                    "type": {
+                        "enumeration": [
+                            {
+                                "value": "upIsGood",
+                                "displayName": "Up is Good"
+                            },
+                            {
+                                "value": "downIsGood",
+                                "displayName": "Down is Good"
+                            },
+                            {
+                                "value": "neutral",
+                                "displayName": "Neutral"
+                            }
+                        ]
+                    }
+                },
+                "fontFamily": {
+                    "displayName": "Font Family",
+                    "type": {
+                        "formatting": {
+                            "fontFamily": true
+                        }
+                    }
+                },
+                "fontSize": {
+                    "displayName": "Font Size",
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                },
+                "bold": {
+                    "displayName": "Bold",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "italic": {
+                    "displayName": "Italic",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "underline": {
+                    "displayName": "Underline",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "changeAlign": {
+                    "displayName": "Alignment",
+                    "type": {
+                        "formatting": {
+                            "alignment": true
+                        }
+                    }
+                }
+            }
+        },
+        "subtitleStyle": {
+            "displayName": "Subtitle",
+            "properties": {
+                "fontFamily": {
+                    "displayName": "Font Family",
+                    "type": {
+                        "formatting": {
+                            "fontFamily": true
+                        }
+                    }
+                },
+                "fontSize": {
+                    "displayName": "Font Size",
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                },
+                "bold": {
+                    "displayName": "Bold",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "italic": {
+                    "displayName": "Italic",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "underline": {
+                    "displayName": "Underline",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "subtitleColor": {
+                    "displayName": "Subtitle Colour",
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "subtitleAlign": {
+                    "displayName": "Alignment",
+                    "type": {
+                        "formatting": {
+                            "alignment": true
+                        }
+                    }
+                }
+            }
+        },
+        "cellBorder": {
+            "displayName": "Card Border",
+            "description": "The border around EACH card. The Border card is the border around the whole wall.",
+            "properties": {
+                "show": {
+                    "displayName": "Show",
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "color": {
+                    "displayName": "Color",
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                },
+                "transparency": {
+                    "displayName": "Transparency",
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "width": {
+                    "displayName": "Width (px)",
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "radius": {
+                    "displayName": "Corner Radius (px)",
+                    "type": {
+                        "numeric": true
                     }
                 }
             }
