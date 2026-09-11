@@ -28,7 +28,7 @@ import DataView = powerbi.DataView;
 
 import { VisualFormattingSettingsModel, textAlignFor, marginsFor } from "./settings";
 
-import { toRgba, compositeOver, surfaceTone, contrastInk } from "./shared/colorHelpers";
+import { toRgba, compositeOver, contrastInk, contrastRatio, mutedInk } from "./shared/colorHelpers";
 import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
@@ -903,6 +903,12 @@ export class Visual implements IVisual {
 
     // ─── Title / landing ───────────────────────────────────────
 
+    private wallInk(darkInk: string): string {
+        const ink = contrastInk(this.wallSurfaceHex, darkInk, surfaceTokens("dark").text);
+        return contrastRatio(ink, this.wallSurfaceHex) >= 4.5
+            ? ink : contrastInk(this.wallSurfaceHex, "#000000", "#ffffff");
+    }
+
     private renderTitle(theme: Theme): void {
         const t = this.formattingSettings.titleSettings;
         if (!t?.showTitle?.value || !t?.titleText?.value) return;
@@ -922,9 +928,9 @@ export class Visual implements IVisual {
         // luminance bucket (NEXUS cycle-08 §7).
         const set = t.titleColor?.value?.value;
         const c = String(set ?? "").toLowerCase() === TITLE_DEFAULT_INK
-            ? contrastInk(this.wallSurfaceHex, TITLE_DEFAULT_INK, surfaceTokens("dark").text)
+            ? this.wallInk(TITLE_DEFAULT_INK)
             : set;
-        if (c) el.style.color = this.isHighContrast ? this.hcForeground : c;
+        el.style.color = this.isHighContrast ? this.hcForeground : (c || "");
         this.rootDiv.appendChild(el);
     }
 
@@ -934,16 +940,16 @@ export class Visual implements IVisual {
         // The landing prompt is wall-level text on the wall's own backing, so
         // it takes the same composited decision the title does (§7). There are
         // no cells here, so no cell-surface decision is affected.
-        const surf = surfaceTokens(this.isHighContrast ? theme : surfaceTone(this.wallSurfaceHex));
+        const ink = this.wallInk(surfaceTokens("light").text);
         const wrap = document.createElement("div");
         wrap.className = "codex-visual-empty";
         const h = document.createElement("div");
         h.className = "codex-visual-empty-title";
-        h.style.color = this.isHighContrast ? this.hcForeground : surf.text;
+        h.style.color = this.isHighContrast ? this.hcForeground : ink;
         h.textContent = "Codex KPI Wall";
         const p = document.createElement("div");
         p.className = "codex-visual-empty-body";
-        p.style.color = this.isHighContrast ? this.hcForeground : surf.muted;
+        p.style.color = this.isHighContrast ? this.hcForeground : mutedInk(ink, this.wallSurfaceHex);
         p.textContent = "Add a Card label and a Value measure. Optional: Target (drives the band colour, delta pill and target strip) and Sort order.";
         wrap.appendChild(h);
         wrap.appendChild(p);
