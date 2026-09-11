@@ -91,8 +91,12 @@ export class Visual implements IVisual {
 
     private lastUpdateOptions: VisualUpdateOptions | null = null;
 
-    /** Held so destroy() can unregister the SAME function object. */
+    /** Held so destroy() can unregister the SAME function objects. */
     private onRootClick: (e: MouseEvent) => void;
+    private onContextMenu: (e: MouseEvent) => void;
+    /** Each rendered cell's selection identity, in render order — the context
+     *  menu and the keyboard path both resolve a cell through this. */
+    private cardIds: ISelectionId[] = [];
 
 
     constructor(options: VisualConstructorOptions) {
@@ -117,10 +121,20 @@ export class Visual implements IVisual {
         this.formattingSettingsService = new FormattingSettingsService();
 
         // Single context menu listener — Policy 1180.2.5 (MS sample BarChart pattern).
-        this.target.addEventListener("contextmenu", (e: MouseEvent) => {
-            this.selectionManager.showContextMenu({}, { x: e.clientX, y: e.clientY });
+        // It passed `{}` for EVERY click, so right-clicking a card handed the
+        // host no category at all and the menu had nothing to act on, while
+        // ordinary selection and tooltips did carry it (NEXUS cycle-08 §8).
+        // Resolve the clicked cell; `{}` is reserved for the wall background.
+        this.onContextMenu = (e: MouseEvent) => {
+            const node = e.target as HTMLElement | null;
+            const cell = node && typeof node.closest === "function"
+                ? (node.closest(".kw-card") as HTMLDivElement | null) : null;
+            const index = cell ? this.cardEls.indexOf(cell) : -1;
+            const identity = index >= 0 ? this.cardIds[index] : null;
+            this.selectionManager.showContextMenu(identity ?? {}, { x: e.clientX, y: e.clientY });
             e.preventDefault();
-        });
+        };
+        this.target.addEventListener("contextmenu", this.onContextMenu);
 
         this.rootDiv = document.createElement("div");
         this.rootDiv.className = "codex-visual-root";
@@ -175,7 +189,13 @@ export class Visual implements IVisual {
                 .populateFormattingSettingsModel(VisualFormattingSettingsModel, dv);
 
             while (this.rootDiv.firstChild) this.rootDiv.removeChild(this.rootDiv.firstChild);
+            // The per-cell registers are rebuilt together with the cells — a
+            // stale identity or border colour left over from the previous
+            // render would be attributed to whatever now sits at that index.
             this.cardEls = [];
+            this.cardIds = [];
+            this.cardBaseBorder = [];
+            this.cardKeys = [];
 
             // ── Theme + suite chrome ──
             const background = this.formattingSettings.background;
@@ -354,6 +374,7 @@ export class Visual implements IVisual {
         el.style.border = `${hc ? 2 : 1}px solid ${baseBorderColor}`;
         this.cardEls[index] = el;
         this.cardBaseBorder[index] = baseBorderColor;
+        this.cardIds[index] = card.selectionId;
 
         if (this.highlightActive && card.highlight == null) el.style.opacity = "0.35";
 
