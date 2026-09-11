@@ -15,7 +15,10 @@ A responsive grid of KPI cards for Power BI. One card per metric, each carrying 
 - Card signature accent with style, colour, corner radius and mirrored corners
 - Click a card to cross-filter other visuals; highlights arriving from other visuals are read and rendered
 - Custom tooltips through the Tooltips field well
-- High contrast mode support, keyboard focus and multi-visual selection
+- Every card is a keyboard focus target: Tab to a card, Enter or Space to select
+  (Ctrl/Cmd to multi-select), ContextMenu or Shift+F10 for its context menu, with
+  a visible focus ring. A real screen reader has not been certified.
+- High contrast mode support and multi-visual selection
 
 ## Data Roles
 | Role | Display Name | Kind | Required? | Description |
@@ -25,6 +28,15 @@ A responsive grid of KPI cards for Power BI. One card per metric, each carrying 
 | target | Target | Measure | No | Drives the band colour, delta pill and target strip |
 | sortOrder | Sort order | Measure | No | Numeric sort key — cards follow it ascending |
 | tooltips | Tooltips | Measure | No | Extra measures for the hover tooltip |
+| changeValue | Change Value | Measure | No | An independent comparison (e.g. -0.18 for an 18% fall vs the prior period). When bound it drives the pill, leaving Target to drive the band colour and target strip |
+| changeLabel | Change Label | Measure | No | Text inside the pill. If blank, Change Value is formatted from its own model format |
+
+**Target and Change Value answer different questions.** Target asks "did we hit
+the number?"; Change Value asks "are we moving the right way?". Bind both and a
+card can read 80 against a target of 100 — a danger strip — beside a green
+`▲ 10.0%` because it improved on last period. Neither calculation silently
+replaces the other. With no Change Value bound the pill is the value/target
+ratio, exactly as before.
 
 `dataReductionAlgorithm` is deliberately capped at **100** rows. This is a scorecard of cards, not a scrolling dataset — a wall beyond that count stops being readable, and the cap keeps rendering bounded.
 
@@ -44,13 +56,34 @@ Show Title, Title Text, Font Family, Font Size, Bold, Italic, Underline, Alignme
 - **Gap** — default 14
 
 ### Value
-Font Family, Font Size, Bold, Italic, Colour.
+Font Family, Font Size, Bold, Italic, Underline, Colour.
+
+### Value Format
+- **Format** — Model format (default: the measure's own format string), Number, Percent, Currency or Text
+- **Currency Symbol**, **Decimal Places** — used when Format is not Model format
+- **Alignment** — left, centre or right
+
+Format: Text renders a non-numeric headline (`On call`) instead of the no-data cell.
 
 ### Label
-Font Family, Font Size, Bold, Italic, Colour, Uppercase.
+Font Family, Font Size, Bold, Italic, Underline, Colour, Uppercase, Alignment.
 
-### Background / Border / Card signature
-Background colour and transparency; border show, colour, transparency, width and radius; card signature show, style, auto colour, colour, corner radius and mirrored corners.
+### Change Indicator
+- **Direction Logic** — Up is Good (default), Down is Good, Neutral. Down is
+  Good inverts the target verdict too, so a cost, defect or elapsed-time wall
+  reads a figure under target as success instead of danger.
+- Font Family, Font Size, Bold, Italic, Underline, Alignment for the pill
+
+### Subtitle
+Font Family, Font Size, Bold, Italic, Underline, Colour, Alignment for the
+card's footer line.
+
+### Background / Border / Card Border / Card signature
+Background colour and transparency. **Border** is the border around the whole
+wall; **Card Border** is the border around each card — both exist, with the same
+colour, transparency, width and radius controls. Card signature show, style,
+auto colour, colour, corner radius and mirrored corners applies to the WALL; the
+per-card accent is KPI Wall > **Cell accent**.
 
 ## Build
 Node 20, `powerbi-visuals-tools` 7.0.2, `powerbi-visuals-api` 5.11.0, TypeScript 5.5.4.
