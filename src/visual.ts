@@ -33,8 +33,7 @@ import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import {
-    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme,
-} from "./shared/codexThemeSettings";
+    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme, flareHexFor } from "./shared/codexThemeSettings";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
 import { applyBorder, resolveBorder, ResolvedBorder } from "./shared/borderSettings";
 import { LicenseGate } from "./shared/licensing";
@@ -307,6 +306,7 @@ export class Visual implements IVisual {
             });
             applyCardSignature(this.cornerSignature, this.formattingSettings.cardSignature, {
                 autoHex: neonColorFor(accentToken(theme), codex),
+                flareHex: flareHexFor(codex),
                 hcActive: this.isHighContrast,
                 hcColor: this.hcForeground,
                 mirror: true,
