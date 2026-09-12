@@ -32,6 +32,9 @@ import { toRgba, compositeOver, contrastInk, contrastRatio, mutedInk } from "./s
 import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
+import {
+    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme,
+} from "./shared/codexThemeSettings";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
 import { applyBorder, resolveBorder, ResolvedBorder } from "./shared/borderSettings";
 import { LicenseGate } from "./shared/licensing";
@@ -94,6 +97,11 @@ export class Visual implements IVisual {
     private hcForeground = "";
     private hcBackground = "";
     private cornerSignature: CardSignatureHandle | null = null;
+    /** The Codex theme resolved by the CURRENT update (#819). Held as a field
+     *  only because the selection ring is redrawn from a host callback that is
+     *  outside the render pass; every render path is handed the same object as
+     *  a parameter so nothing resolves the theme twice. */
+    private codex: ResolvedCodexTheme | null = null;
     private highlightActive = false;
     private cardEls: HTMLDivElement[] = [];
     /** Selection state is held by IDENTITY. Grid indices are re-keyed by every
@@ -106,6 +114,10 @@ export class Visual implements IVisual {
     /** Each rendered cell's OWN border colour, so deselecting can put it back
      *  instead of leaving the selection accent behind (NEXUS cycle-08 §3). */
     private cardBaseBorder: string[] = [];
+    /** Each rendered cell's OWN box-shadow (the Neon border halo, "" otherwise).
+     *  The selection ring is drawn into the same slot, so it composes with this
+     *  instead of wiping it — a deselect used to leave the cell with no halo. */
+    private cardBaseShadow: string[] = [];
     /** DERIVED from selectedKeys against the current render order — never the
      *  store. Kept as a field because it is the thing the ring is drawn from. */
     private selectedIdx = new Set<number>();
@@ -242,13 +254,14 @@ export class Visual implements IVisual {
             this.cardEls = [];
             this.cardIds = [];
             this.cardBaseBorder = [];
+            this.cardBaseShadow = [];
             this.cardKeys = [];
 
             // ── Theme + suite chrome ──
             const background = this.formattingSettings.background;
             const bgHex = background.backgroundColor.value?.value ?? "#ffffff";
             const bgTransparencyPct = background.transparency.value ?? 100;
-            const theme: Theme = themeFor(bgHex);
+            const autoTheme: Theme = themeFor(bgHex);
             // The wall's own backing, as SEEN. The title's ink was picked from
             // the stored fill, so white at 100% transparency over a dark page
             // still chose dark ink and 95%-transparent black over white chose
@@ -262,11 +275,26 @@ export class Visual implements IVisual {
             // readable from here, and an explicit ink override remains the
             // answer for those reports.
             const behindHex = colorPalette?.background?.value || "#ffffff";
+            // Nexus Codex Theme (#819): ONE switch above the wall's own theme
+            // pick, resolved ONCE here and routed into every cell — the wall
+            // must not re-derive a theme per cell or the grid could disagree
+            // with its own chrome. Auto returns exactly the values derived
+            // above (surfaceHex IS compositeOver(bgHex, transparency, behind)),
+            // so an untouched report renders byte-for-byte as before; Dark,
+            // Light and Neon force the token set and paint the Codex surface at
+            // the card's own Surface Transparency. HC already collapsed to Auto
+            // inside the resolver, so no HC branch is added here.
+            const codex = resolveCodexTheme(this.formattingSettings.codexTheme, {
+                hcActive: this.isHighContrast, autoTheme, autoBgHex: bgHex,
+                autoTransparencyPct: bgTransparencyPct, behindHex,
+            });
+            this.codex = codex;
+            const theme: Theme = codex.theme;
             this.wallSurfaceHex = this.isHighContrast
                 ? this.hcBackground
-                : compositeOver(bgHex, bgTransparencyPct, behindHex);
+                : codex.surfaceHex;
             this.target.style.background = this.isHighContrast
-                ? this.hcBackground : toRgba(bgHex, bgTransparencyPct);
+                ? this.hcBackground : toRgba(codex.bgHex, codex.transparencyPct);
             applyBorder(this.target, this.formattingSettings.visualBorder, {
                 hcActive: this.isHighContrast,
                 hcColor: this.hcForeground,
@@ -278,15 +306,17 @@ export class Visual implements IVisual {
                 hcColor: this.hcForeground,
             });
             applyCardSignature(this.cornerSignature, this.formattingSettings.cardSignature, {
-                autoHex: accentToken(theme),
+                autoHex: neonColorFor(accentToken(theme), codex),
                 hcActive: this.isHighContrast,
                 hcColor: this.hcForeground,
                 mirror: true,
-                glowMix: this.isHighContrast ? 0 : (theme === "dark" ? 55 : 0),
+                glowMix: this.isHighContrast ? 0
+                    : codex.neon ? codex.glow
+                    : (theme === "dark" ? 55 : 0),
                 muted: false,
             });
 
-            this.renderTitle(theme);
+            this.renderTitle(theme, codex);
 
             this.highlightActive = !!dv?.categorical?.values?.find(
                 v => v.source.roles && v.source.roles["value"])?.highlights;
@@ -298,7 +328,7 @@ export class Visual implements IVisual {
                 return;
             }
 
-            this.renderGrid(cards, theme);
+            this.renderGrid(cards, theme, codex);
             this.syncSelectionFromHost();
             if (focusedKey != null) {
                 const focusedCard = this.cardKeys.indexOf(focusedKey);
@@ -497,7 +527,7 @@ export class Visual implements IVisual {
 
     // ─── Render ────────────────────────────────────────────────
 
-    private renderGrid(cards: CardData[], theme: Theme): void {
+    private renderGrid(cards: CardData[], theme: Theme, codex: ResolvedCodexTheme): void {
         const layout = this.formattingSettings.layout;
         const colsMode = String(layout.columnsMode.value?.value || "auto");
         const minWidth = layout.minCardWidth.value ?? 240;
@@ -518,11 +548,11 @@ export class Visual implements IVisual {
             : `repeat(${colsMode}, minmax(${minWidth}px, 1fr))`;
 
         this.cardKeys = cards.map(c => this.keyOf(c.selectionId));
-        cards.forEach((card, i) => grid.appendChild(this.renderCard(card, i, theme)));
+        cards.forEach((card, i) => grid.appendChild(this.renderCard(card, i, theme, codex)));
         this.rootDiv.appendChild(grid);
     }
 
-    private renderCard(card: CardData, index: number, theme: Theme): HTMLDivElement {
+    private renderCard(card: CardData, index: number, theme: Theme, codex: ResolvedCodexTheme): HTMLDivElement {
         const kw = this.formattingSettings.kpiWall;
         const vs = this.formattingSettings.valueStyle;
         const ls = this.formattingSettings.labelStyle;
@@ -569,6 +599,22 @@ export class Visual implements IVisual {
             : verdict ? bandColor(verdict, theme)
             : accentToken(theme);
         const glow = !hc && theme === "dark" && !isEmpty;
+        // #819 — a forced mode OWNS the cell's text inks: a colour the user
+        // picked for a white cell is not a choice about the Codex dark surface,
+        // and the cell IS that surface (surf.card). Auto keeps every pane ink.
+        const inkOverride = codex.mode !== "auto";
+        // The glow BUDGET. Every site below already glowed on a dark theme at a
+        // fixed 40% — under Neon that constant becomes the card's own Glow
+        // Strength, so one slider drives the whole wall.
+        const glowPct = codex.neon ? codex.glow : 40;
+        // The cell's OWN signature (accent bar, second bracket, status dot, lit
+        // strip segments) is what takes the flare colour under Neon scope
+        // "flare" — the same treatment the KPI Card pilot gives its single
+        // card's brackets, dot and LED strip. The delta pill keeps the verdict
+        // hue: its ink is contrast-picked against its own fill, and a chip that
+        // says "▼ 8.4%" in the flare colour would be stating a verdict it does
+        // not hold.
+        const accentHex = neonColorFor(bandHex, codex);
         // Keyboard focus ring colour — a painted surface, so it takes the
         // system foreground slot under high contrast (NEXUS cycle-08 §9).
         const focusRing = hc ? this.hcForeground : accentToken(theme);
@@ -584,6 +630,11 @@ export class Visual implements IVisual {
         const baseBorderColor = cellBorder ? cellBorder.colorCss : (hc ? this.hcForeground : surf.border);
         el.style.border = `${cellBorder ? cellBorder.width : (hc ? 2 : 1)}px solid ${baseBorderColor}`;
         if (cellBorder) el.style.borderRadius = `${cellBorder.radius}px`;
+        // Neon: a halo on the cell's own border — the cell IS the wall's
+        // primary mark. A no-data cell is excluded, the same way its accent and
+        // dot stay muted: an absent value flaring would read as a live one.
+        this.cardBaseShadow[index] = (glow && codex.neon) ? neonShadow(accentHex, codex.glow) : "";
+        el.style.boxShadow = this.cardBaseShadow[index];
         this.cardEls[index] = el;
         this.cardBaseBorder[index] = baseBorderColor;
         this.cardIds[index] = card.selectionId;
@@ -603,19 +654,19 @@ export class Visual implements IVisual {
             bar = document.createElement("div");
             bar.className = "kw-bar";
             if (accentStyle === "cornerBracket") {
-                bar.style.borderColor = bandHex;
-                if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
+                bar.style.borderColor = accentHex;
+                if (glow) bar.style.filter = `drop-shadow(0 0 6px ${toRgba(accentHex, glowPct)})`;
             } else {
                 bar.style.background = hc ? this.hcForeground :
-                    `linear-gradient(180deg, ${mix("#ffffff", bandHex, 0.55)}, ${bandHex} 45%, ${mix("#000000", bandHex, 0.70)})`;
-                if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(bandHex, 40)}`;
+                    `linear-gradient(180deg, ${mix("#ffffff", accentHex, 0.55)}, ${accentHex} 45%, ${mix("#000000", accentHex, 0.70)})`;
+                if (glow) bar.style.boxShadow = `0 0 10px ${toRgba(accentHex, glowPct)}`;
             }
             el.appendChild(bar);
             if (twoCorners) {
                 const c2 = document.createElement("div");
                 c2.className = "kw-corner2";
-                c2.style.borderColor = bandHex;
-                if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(bandHex, 40)})`;
+                c2.style.borderColor = accentHex;
+                if (glow) c2.style.filter = `drop-shadow(0 0 6px ${toRgba(accentHex, glowPct)})`;
                 el.appendChild(c2);
             }
         }
@@ -631,7 +682,9 @@ export class Visual implements IVisual {
         eye.className = "kw-eye";
         eye.textContent = ls.uppercase.value ? card.label.toUpperCase() : card.label;
         this.applyTypography(eye, ls, { on: "700", off: "600" });
-        eye.style.color = hc ? this.hcForeground : (ls.color.value?.value || surf.muted);
+        eye.style.color = hc ? this.hcForeground
+            : inkOverride ? surf.muted
+            : (ls.color.value?.value || surf.muted);
         const labelMargins = marginsFor(String(ls.labelAlign?.value ?? "left"));
         eye.style.marginLeft = labelMargins.left;
         eye.style.marginRight = labelMargins.right;
@@ -640,8 +693,8 @@ export class Visual implements IVisual {
             const dot = document.createElement("span");
             dot.className = "kw-dot";
             dot.style.background = hc ? this.hcForeground
-                : `radial-gradient(circle at 35% 30%, ${mix("#ffffff", bandHex, 0.35)}, ${bandHex} 55%, ${mix("#000000", bandHex, 0.55)})`;
-            if (glow) dot.style.boxShadow = `0 0 8px ${toRgba(bandHex, 40)}`;
+                : `radial-gradient(circle at 35% 30%, ${mix("#ffffff", accentHex, 0.35)}, ${accentHex} 55%, ${mix("#000000", accentHex, 0.55)})`;
+            if (glow) dot.style.boxShadow = `0 0 8px ${toRgba(accentHex, glowPct)}`;
             head.appendChild(dot);
         }
         el.appendChild(head);
@@ -681,7 +734,15 @@ export class Visual implements IVisual {
                 ? this.formatValue(reading as number, card.valueFormat)
                 : this.formatExplicit(reading as number, formatType);
         this.applyTypography(val, vs, { on: "700", off: "500" });
-        val.style.color = hc ? this.hcForeground : (vs.color.value?.value || surf.text);
+        val.style.color = hc ? this.hcForeground
+            : inkOverride ? surf.text
+            : (vs.color.value?.value || surf.text);
+        // Neon: the headline flares in its own ink (or the flare colour when
+        // scoped to it) — the pilot's rule. Nothing smaller than the headline
+        // glows, and never under high contrast.
+        val.style.textShadow = codex.neon && !hc
+            ? neonShadow(neonColorFor(val.style.color, codex), codex.glow)
+            : "";
         // Alignment is textAlign only: align-self would shrink the block to its
         // content and defeat the stylesheet's ellipsis on a narrow cell.
         val.style.textAlign = textAlignFor(String(this.formattingSettings.valueFormat.valueAlign?.value ?? "left"));
@@ -728,6 +789,10 @@ export class Visual implements IVisual {
                 const pillSurface = compositeOver(pillHex, 85, surf.card);
                 pill.style.color = hc ? this.hcForeground : contrastInk(pillSurface, pillHex, surf.text);
                 pill.style.background = hc ? "transparent" : toRgba(pillHex, 85);
+                // Neon: the chip flares in its OWN verdict hue at the card's
+                // glow budget. Its fill and ink are untouched, so the contrast
+                // pick above still holds against the surface a viewer reads.
+                if (!hc && codex.neon) pill.style.boxShadow = neonShadow(pillHex, codex.glow);
                 if (hc) pill.style.border = `1px solid ${this.hcForeground}`;
                 pill.textContent = pillText;
                 // Pill typography/alignment — it was FIXED, so a KPI Card
@@ -743,6 +808,7 @@ export class Visual implements IVisual {
                 const sub = document.createElement("span");
                 sub.className = "kw-sub";
                 sub.style.color = hc ? this.hcForeground
+                    : inkOverride ? surf.muted
                     : (ss.subtitleColor.value?.value || surf.muted);
                 this.applyTypography(sub, ss, { on: "700", off: "400" });
                 const subMargins = marginsFor(String(ss.subtitleAlign?.value ?? "left"));
@@ -760,8 +826,8 @@ export class Visual implements IVisual {
             for (let s = 0; s < STRIP_SEGMENTS; s++) {
                 const seg = document.createElement("span");
                 if (s < lit) {
-                    seg.style.background = bandHex;
-                    if (glow) seg.style.boxShadow = `0 0 5px ${toRgba(bandHex, 40)}`;
+                    seg.style.background = accentHex;
+                    if (glow) seg.style.boxShadow = `0 0 5px ${toRgba(accentHex, glowPct)}`;
                 } else {
                     seg.style.background = hc ? "transparent" : surf.track;
                     if (hc) seg.style.border = `1px solid ${this.hcForeground}`;
@@ -883,8 +949,18 @@ export class Visual implements IVisual {
 
     /** Board .k2.sel — accent ring on selected cards, others untouched. */
     private applySelectionRing(): void {
-        const theme = themeFor(this.formattingSettings?.background?.backgroundColor?.value?.value ?? "#ffffff");
-        const acc = this.isHighContrast ? this.hcForeground : accentToken(theme);
+        // The theme the LAST update resolved — never a second derivation. A
+        // ring drawn before the first render has no cells to draw on, so the
+        // fallback is only ever reached with an empty register.
+        const codex = this.codex;
+        const theme: Theme = codex ? codex.theme
+            : themeFor(this.formattingSettings?.background?.backgroundColor?.value?.value ?? "#ffffff");
+        const accToken = accentToken(theme);
+        const acc = this.isHighContrast ? this.hcForeground
+            : codex ? neonColorFor(accToken, codex) : accToken;
+        // The ring's own glow takes the card's budget under Neon (70 otherwise,
+        // the shipped value).
+        const ringGlow = codex?.neon ? codex.glow : 70;
         // Re-derive positions from identities EVERY time the ring is drawn —
         // this is what survives a sort (NEXUS cycle-08 §2).
         this.selectedIdx = new Set<number>();
@@ -895,9 +971,12 @@ export class Visual implements IVisual {
         this.cardEls.forEach((el, i) => {
             if (!el) return;
             const sel = this.selectedIdx.has(i);
+            // The cell's own Neon halo is the BASE of this slot, so a deselect
+            // puts the halo back instead of clearing the cell's only glow.
+            const base = this.cardBaseShadow[i] ?? "";
             el.style.boxShadow = sel
-                ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, 70)}` : ""}`
-                : "";
+                ? `0 0 0 1px ${acc}${theme === "dark" && !this.isHighContrast ? `, 0 0 18px ${toRgba(acc, ringGlow)}` : ""}${base ? `, ${base}` : ""}`
+                : base;
             // The selected branch used to set borderColor and the unselected
             // branch never put it back, so a deselected card kept the cyan
             // accent border for the rest of the session (NEXUS cycle-08 §3).
@@ -918,7 +997,7 @@ export class Visual implements IVisual {
             ? ink : contrastInk(this.wallSurfaceHex, "#000000", "#ffffff");
     }
 
-    private renderTitle(theme: Theme): void {
+    private renderTitle(theme: Theme, codex: ResolvedCodexTheme): void {
         const t = this.formattingSettings.titleSettings;
         if (!t?.showTitle?.value || !t?.titleText?.value) return;
         const el = document.createElement("div");
@@ -935,8 +1014,11 @@ export class Visual implements IVisual {
         // surface judged is the COMPOSITED one, not the stored fill, and the
         // ink is the higher-contrast of the two candidates rather than a
         // luminance bucket (NEXUS cycle-08 §7).
+        // A FORCED Codex mode extends that rule: the wall surface is now the
+        // Codex one, so a title ink chosen for the old surface is adapted too
+        // (#819) — "adapt when forced OR default".
         const set = t.titleColor?.value?.value;
-        const c = String(set ?? "").toLowerCase() === TITLE_DEFAULT_INK
+        const c = codex.mode !== "auto" || String(set ?? "").toLowerCase() === TITLE_DEFAULT_INK
             ? this.wallInk(TITLE_DEFAULT_INK)
             : set;
         el.style.color = this.isHighContrast ? this.hcForeground : (c || "");
@@ -977,6 +1059,7 @@ export class Visual implements IVisual {
     }
 
     public getFormattingModel(): powerbi.visuals.FormattingModel {
+        this.formattingSettings.codexTheme.reveal();
         return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
     }
 
