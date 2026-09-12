@@ -33,7 +33,7 @@ import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import {
-    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme, flareHexFor, forcedInk } from "./shared/codexThemeSettings";
+    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme, flareHexFor, forcedInk, forcedChrome } from "./shared/codexThemeSettings";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
 import { applyBorder, resolveBorder, ResolvedBorder } from "./shared/borderSettings";
 import { LicenseGate } from "./shared/licensing";
@@ -53,6 +53,12 @@ const STRIP_SEGMENTS = 10;   // board: 10-segment quantised target strip
 // A drift between the two would make the title adapt when the user HAD set a
 // colour, or refuse to adapt when they had not.
 const TITLE_DEFAULT_INK = "#1a1a2e";
+
+// Must match the DECLARED default of BorderSettings.color in shared/borderSettings.ts
+// (the shared Border card, reused verbatim by CellBorderSettings). #819 rule 2 keys
+// forcedChrome's `isDefault` off it: an untouched swatch takes the forced mode's
+// border token, one the author actually picked survives while it still separates.
+const BORDER_DEFAULT_HEX = "#8f8ab8";
 
 interface CardData {
     label: string;
@@ -300,13 +306,26 @@ export class Visual implements IVisual {
                 palette: this.host.colorPalette,
                 metadataObjects: undefined,
             });
-            // #819 rule 2 — the wall's own frame is chrome, not data: under a
-            // forced mode it takes that mode's border token instead of a colour
-            // authored for the other tone. Auto and HC are untouched; when the
-            // Border card is off applyBorder has already cleared border-style,
-            // so the colour alone paints nothing.
-            if (codex.mode !== "auto" && !this.isHighContrast) {
-                this.target.style.borderColor = surfaceTokens(theme).border;
+            // #819 rule 2, GUARDED (pass 2) — the wall's own frame is chrome, not
+            // data, but the Border card has a PICKER behind it, so a forced mode
+            // must not make that picker inert. forcedChrome keeps an author's
+            // deliberate frame colour while it still SEPARATES from the Codex
+            // surface (≥ 1.3:1 — a frame has to be visible, not readable) and
+            // falls back to the mode's border token when the swatch is untouched
+            // or the colour would vanish into the surface. Auto and HC are
+            // untouched; when the Border card is off applyBorder has already
+            // cleared border-style, so a colour alone paints nothing.
+            const wallBorder = this.formattingSettings.visualBorder;
+            if (codex.mode !== "auto" && !this.isHighContrast && wallBorder) {
+                const wallBorderHex = wallBorder.color.value?.value ?? "";
+                const wallChrome = forcedChrome(
+                    wallBorderHex, surfaceTokens(theme).border, codex,
+                    wallBorderHex.toLowerCase() === BORDER_DEFAULT_HEX);
+                // Transparency is the author's too: when their hex survives, repaint
+                // it at the same alpha applyBorder used, not as a flat hex.
+                this.target.style.borderColor = wallChrome === wallBorderHex
+                    ? toRgba(wallBorderHex, wallBorder.transparency.value ?? 0)
+                    : wallChrome;
             }
             this.cellBorderPaint = resolveBorder(this.formattingSettings.cellBorder, {
                 hcActive: this.isHighContrast,
@@ -631,14 +650,22 @@ export class Visual implements IVisual {
         // Per-card border (NEXUS cycle-08 parity gap 7). Off by default, so an
         // untouched report keeps the theme token and the stylesheet's radius —
         // the wall-level Border card is untouched and still paints the outside.
-        // #819 rule 2 — the cell border is chrome, not data, so under a forced
-        // mode it takes that mode's border token however it was authored; Auto
-        // keeps the user's colour and HC keeps the system foreground. Width and
-        // radius are geometry, not tone, and stay the user's in every mode.
+        // #819 rule 2, GUARDED (pass 2) — the cell border is chrome, not data, but
+        // the Card Border card has its own picker, so the same guard applies:
+        // untouched swatch → the forced mode's border token; a colour the author
+        // picked survives while it separates from the Codex surface at ≥ 1.3:1.
+        // Auto is the user's colour verbatim (with their transparency) and HC keeps
+        // the system foreground. Width and radius are geometry, not tone, and stay
+        // the user's in every mode. Card off → the theme token, as before.
         const cellBorder = this.cellBorderPaint;
+        const cellBorderHex = this.formattingSettings.cellBorder?.color.value?.value ?? "";
+        const cellChrome = forcedChrome(
+            cellBorderHex, surf.border, codex,
+            cellBorderHex.toLowerCase() === BORDER_DEFAULT_HEX);
         const baseBorderColor = hc ? this.hcForeground
-            : (cellBorder && codex.mode === "auto") ? cellBorder.colorCss
-            : surf.border;
+            : !cellBorder ? surf.border
+            : cellChrome === cellBorderHex ? cellBorder.colorCss
+            : cellChrome;
         el.style.border = `${cellBorder ? cellBorder.width : (hc ? 2 : 1)}px solid ${baseBorderColor}`;
         if (cellBorder) el.style.borderRadius = `${cellBorder.radius}px`;
         // Neon: a halo on the cell's own border — the cell IS the wall's
