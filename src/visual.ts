@@ -33,7 +33,7 @@ import { Band, Theme, band, bandColor, accentToken } from "./shared/bandEngine";
 import { surfaceTokens, mix } from "./shared/designTokens";
 import { makeCornerBrackets, CardSignatureHandle } from "./shared/cardSignature";
 import {
-    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme, flareHexFor } from "./shared/codexThemeSettings";
+    resolveCodexTheme, neonColorFor, neonShadow, ResolvedCodexTheme, flareHexFor, forcedInk } from "./shared/codexThemeSettings";
 import { applyCardSignature } from "./shared/cardSignatureSettings";
 import { applyBorder, resolveBorder, ResolvedBorder } from "./shared/borderSettings";
 import { LicenseGate } from "./shared/licensing";
@@ -300,6 +300,14 @@ export class Visual implements IVisual {
                 palette: this.host.colorPalette,
                 metadataObjects: undefined,
             });
+            // #819 rule 2 — the wall's own frame is chrome, not data: under a
+            // forced mode it takes that mode's border token instead of a colour
+            // authored for the other tone. Auto and HC are untouched; when the
+            // Border card is off applyBorder has already cleared border-style,
+            // so the colour alone paints nothing.
+            if (codex.mode !== "auto" && !this.isHighContrast) {
+                this.target.style.borderColor = surfaceTokens(theme).border;
+            }
             this.cellBorderPaint = resolveBorder(this.formattingSettings.cellBorder, {
                 hcActive: this.isHighContrast,
                 hcColor: this.hcForeground,
@@ -599,22 +607,19 @@ export class Visual implements IVisual {
             : verdict ? bandColor(verdict, theme)
             : accentToken(theme);
         const glow = !hc && theme === "dark" && !isEmpty;
-        // #819 — a forced mode OWNS the cell's text inks: a colour the user
-        // picked for a white cell is not a choice about the Codex dark surface,
-        // and the cell IS that surface (surf.card). Auto keeps every pane ink.
-        const inkOverride = codex.mode !== "auto";
         // The glow BUDGET. Every site below already glowed on a dark theme at a
         // fixed 40% — under Neon that constant becomes the card's own Glow
         // Strength, so one slider drives the whole wall.
         const glowPct = codex.neon ? codex.glow : 40;
         // The cell's OWN signature (accent bar, second bracket, status dot, lit
-        // strip segments) is what takes the flare colour under Neon scope
-        // "flare" — the same treatment the KPI Card pilot gives its single
-        // card's brackets, dot and LED strip. The delta pill keeps the verdict
-        // hue: its ink is contrast-picked against its own fill, and a chip that
-        // says "▼ 8.4%" in the flare colour would be stating a verdict it does
-        // not hold.
-        const accentHex = neonColorFor(bandHex, codex);
+        // strip segments) takes the flare colour under Neon scope "flare" ONLY
+        // while it is an accent. #819 rule 1: once a target gives the cell a
+        // verdict, that hue MEANS success/warning/danger — it is data, and the
+        // flare must not repaint it; it keeps its own hue and glows in it. A
+        // no-data cell is the same case in reverse: its muted token says
+        // "absent", which the flare would also overwrite. The delta pill was
+        // already exempt for the same reason.
+        const accentHex = (verdict || isEmpty) ? bandHex : neonColorFor(bandHex, codex);
         // Keyboard focus ring colour — a painted surface, so it takes the
         // system foreground slot under high contrast (NEXUS cycle-08 §9).
         const focusRing = hc ? this.hcForeground : accentToken(theme);
@@ -626,8 +631,14 @@ export class Visual implements IVisual {
         // Per-card border (NEXUS cycle-08 parity gap 7). Off by default, so an
         // untouched report keeps the theme token and the stylesheet's radius —
         // the wall-level Border card is untouched and still paints the outside.
+        // #819 rule 2 — the cell border is chrome, not data, so under a forced
+        // mode it takes that mode's border token however it was authored; Auto
+        // keeps the user's colour and HC keeps the system foreground. Width and
+        // radius are geometry, not tone, and stay the user's in every mode.
         const cellBorder = this.cellBorderPaint;
-        const baseBorderColor = cellBorder ? cellBorder.colorCss : (hc ? this.hcForeground : surf.border);
+        const baseBorderColor = hc ? this.hcForeground
+            : (cellBorder && codex.mode === "auto") ? cellBorder.colorCss
+            : surf.border;
         el.style.border = `${cellBorder ? cellBorder.width : (hc ? 2 : 1)}px solid ${baseBorderColor}`;
         if (cellBorder) el.style.borderRadius = `${cellBorder.radius}px`;
         // Neon: a halo on the cell's own border — the cell IS the wall's
@@ -682,9 +693,13 @@ export class Visual implements IVisual {
         eye.className = "kw-eye";
         eye.textContent = ls.uppercase.value ? card.label.toUpperCase() : card.label;
         this.applyTypography(eye, ls, { on: "700", off: "600" });
+        // #819 rule 3 — an ink the user set explicitly survives a forced mode
+        // while it still reads on that mode's surface; a blank swatch (the
+        // declared default, "automatic") always takes the mode token. Auto is
+        // the pane value verbatim, exactly as before.
+        const labelInk = ls.color.value?.value ?? "";
         eye.style.color = hc ? this.hcForeground
-            : inkOverride ? surf.muted
-            : (ls.color.value?.value || surf.muted);
+            : forcedInk(labelInk, surf.muted, codex, !labelInk);
         const labelMargins = marginsFor(String(ls.labelAlign?.value ?? "left"));
         eye.style.marginLeft = labelMargins.left;
         eye.style.marginRight = labelMargins.right;
@@ -734,9 +749,9 @@ export class Visual implements IVisual {
                 ? this.formatValue(reading as number, card.valueFormat)
                 : this.formatExplicit(reading as number, formatType);
         this.applyTypography(val, vs, { on: "700", off: "500" });
+        const valueInk = vs.color.value?.value ?? "";
         val.style.color = hc ? this.hcForeground
-            : inkOverride ? surf.text
-            : (vs.color.value?.value || surf.text);
+            : forcedInk(valueInk, surf.text, codex, !valueInk);
         // Neon: the headline flares in its own ink (or the flare colour when
         // scoped to it) — the pilot's rule. Nothing smaller than the headline
         // glows, and never under high contrast.
@@ -807,9 +822,9 @@ export class Visual implements IVisual {
             if (subOn) {
                 const sub = document.createElement("span");
                 sub.className = "kw-sub";
+                const subInk = ss.subtitleColor.value?.value ?? "";
                 sub.style.color = hc ? this.hcForeground
-                    : inkOverride ? surf.muted
-                    : (ss.subtitleColor.value?.value || surf.muted);
+                    : forcedInk(subInk, surf.muted, codex, !subInk);
                 this.applyTypography(sub, ss, { on: "700", off: "400" });
                 const subMargins = marginsFor(String(ss.subtitleAlign?.value ?? "left"));
                 sub.style.marginLeft = subMargins.left;
@@ -1014,13 +1029,15 @@ export class Visual implements IVisual {
         // surface judged is the COMPOSITED one, not the stored fill, and the
         // ink is the higher-contrast of the two candidates rather than a
         // luminance bucket (NEXUS cycle-08 §7).
-        // A FORCED Codex mode extends that rule: the wall surface is now the
-        // Codex one, so a title ink chosen for the old surface is adapted too
-        // (#819) — "adapt when forced OR default".
+        // A FORCED Codex mode extends that rule through the ONE suite guard
+        // (#819 rule 3): the wall surface is now the Codex one, so an untouched
+        // swatch takes the adapted ink, and a title colour the user DID set is
+        // kept while it still reads ≥ 4.5:1 on that surface — only an
+        // illegible one is flipped. forcedInk judges against codex.surfaceHex,
+        // which IS this.wallSurfaceHex whenever a mode is forced.
         const set = t.titleColor?.value?.value;
-        const c = codex.mode !== "auto" || String(set ?? "").toLowerCase() === TITLE_DEFAULT_INK
-            ? this.wallInk(TITLE_DEFAULT_INK)
-            : set;
+        const titleIsDefault = !set || String(set).toLowerCase() === TITLE_DEFAULT_INK;
+        const c = forcedInk(String(set ?? ""), this.wallInk(TITLE_DEFAULT_INK), codex, titleIsDefault);
         el.style.color = this.isHighContrast ? this.hcForeground : (c || "");
         this.rootDiv.appendChild(el);
     }
