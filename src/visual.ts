@@ -162,7 +162,7 @@ export class Visual implements IVisual {
 
             if (this.lastUpdateOptions) this.update(this.lastUpdateOptions);
 
-        });
+        }, "kpi-wall");
         this.host = options.host;
         this.target = options.element;
         this.target.style.margin = "0";
@@ -230,7 +230,7 @@ export class Visual implements IVisual {
         this.events.renderingStarted(options);
         this.lastUpdateOptions = options;
 
-        if (this.licenseGate.blockedThisFrame()) {
+        if (this.licenseGate.blockedThisFrame(options.dataViews)) {
             this.target.style.display = "none";
             this.events.renderingFinished(options);
             return;

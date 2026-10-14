@@ -8,6 +8,7 @@ import FormattingSettingsSlice = formattingSettings.Slice;
 import FormattingSettingsModel = formattingSettings.Model;
 
 import { BackgroundSettings } from "./shared/backgroundSettings";
+import { LicenceSettings } from "./shared/licenceSettings";
 import { CodexThemeSettings } from "./shared/codexThemeSettings";
 import { BorderSettings } from "./shared/borderSettings";
 import { CardSignatureSettings } from "./shared/cardSignatureSettings";
@@ -282,11 +283,15 @@ export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     cellBorder = new CellBorderSettings();
     visualBorder = new BorderSettings();
 
+    licence = new LicenceSettings();
+
     cards = [
         this.kpiWall, this.layout,
         this.valueStyle, this.valueFormat, this.labelStyle,
         this.changeSettings, this.subtitleStyle,
         this.titleSettings, this.background, this.codexTheme, this.cardSignature,
         this.cellBorder, this.visualBorder,
+
+        this.licence
     ];
 }
